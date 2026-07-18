@@ -3,11 +3,125 @@ import { requireDataSourceId, ensureOption, findPageByNodeId } from "./schema.ts
 import { loadConfig } from "../config.ts";
 import { logger } from "../logging.ts";
 import { upsertObject, getObject, touchChecked, type GithubObjectRow } from "../state/sqlite.ts";
-import { nowIso } from "../util.ts";
+import { nowIso, sleep, truncate } from "../util.ts";
 import type { RepoProjection, WorkItemProjection } from "../projection.ts";
 
 // Idempotent upsert: SQLite map is source of truth for page_id; Notion is queried by
 // GitHub Node ID property as a recovery path when SQLite is missing the mapping.
+
+// ponytail: async markdown path only for large bodies (>= 50KB).
+// Ceiling: if Notion raises the sync timeout, lower the threshold or always use async.
+const ASYNC_MARKDOWN_THRESHOLD = 50_000;
+// Hard cap on markdown body sent to Notion. Bodies above this get truncated.
+// ponytail: 500KB is well within Notion's async limit but prevents multi-MB bodies from 500ing.
+const HARD_MARKDOWN_CAP = 500_000;
+
+type AsyncTaskInitial = {
+  object: "async_task";
+  id: string;
+  status: "queued" | "running" | "retrying";
+  status_url: string;
+  poll_after_seconds: number;
+};
+
+type AsyncTaskSucceeded = {
+  object: "async_task";
+  id: string;
+  status: "succeeded";
+  result: Record<string, unknown>;
+};
+
+type AsyncTaskFailed = {
+  object: "async_task";
+  id: string;
+  status: "failed";
+  error: { object: "error"; status: number; code: string; message: string };
+};
+
+type AsyncTaskResponse = AsyncTaskInitial | AsyncTaskSucceeded | AsyncTaskFailed;
+
+function capMarkdown(md: string): string {
+  if (md.length <= HARD_MARKDOWN_CAP) return md;
+  // ponytail: truncate at cap with a notice. Ceiling: smarter section-aware truncation.
+  return truncate(md, HARD_MARKDOWN_CAP) + "\n\n_...body truncated (over 500KB)_\n";
+}
+
+async function replaceMarkdown(pageId: string, markdown: string): Promise<void> {
+  const notion = getNotion();
+  const md = capMarkdown(markdown);
+  if (md.length < ASYNC_MARKDOWN_THRESHOLD) {
+    await notionCall(() =>
+      notion.pages.updateMarkdown({
+        page_id: pageId,
+        type: "replace_content",
+        replace_content: { new_str: md },
+      }),
+    );
+    return;
+  }
+  const res = await notionCall(() =>
+    notion.pages.updateMarkdown({
+      page_id: pageId,
+      type: "replace_content",
+      replace_content: { new_str: md },
+      allow_async: true,
+    } as Parameters<typeof notion.pages.updateMarkdown>[0] & { allow_async: boolean }),
+  ) as unknown as AsyncTaskInitial;
+  // Async response: object is "async_task" with a task id, no page content
+  if (res.object === "async_task" && res.status) {
+    logger.info({ page_id: pageId, task_id: res.id, body_len: md.length }, "markdown async task started");
+    await pollAsyncTask(res.id, res.poll_after_seconds);
+    return;
+  }
+  // Notion processed synchronously despite allow_async
+}
+
+async function createPageWithMarkdown(parent: { data_source_id: string }, properties: never, markdown: string): Promise<{ id: string }> {
+  const notion = getNotion();
+  const md = capMarkdown(markdown);
+  if (md.length < ASYNC_MARKDOWN_THRESHOLD) {
+    const created = await notionCall(() =>
+      notion.pages.create({ parent, properties, markdown: md }),
+    );
+    return { id: created.id };
+  }
+  const res = await notionCall(() =>
+    notion.pages.create({
+      parent,
+      properties,
+      markdown: md,
+      allow_async: true,
+    } as Parameters<typeof notion.pages.create>[0] & { allow_async: boolean }),
+  ) as unknown as AsyncTaskInitial & { id: string; object: string };
+  if (res.object === "async_task") {
+    logger.info({ task_id: res.id, body_len: md.length }, "create page async task started");
+    const result = await pollAsyncTask(res.id, res.poll_after_seconds);
+    // Extract page id from result. Shape: { page: { id: "..." } } or { id: "..." }
+    const r = result.result as Record<string, unknown>;
+    const pageId = r?.page ? (r.page as { id: string }).id : (r as { id?: string })?.id;
+    if (!pageId) throw new Error(`Async page create succeeded but no page id in result: ${JSON.stringify(r).slice(0, 200)}`);
+    return { id: pageId };
+  }
+  // Notion processed synchronously despite allow_async
+  return { id: res.id };
+}
+
+async function pollAsyncTask(taskId: string, pollAfterSeconds: number): Promise<AsyncTaskSucceeded> {
+  const notion = getNotion();
+  // ponytail: poll with cap of 15 attempts. Ceiling: exponential backoff + dead-letter if Notion async fails.
+  for (let i = 0; i < 15; i++) {
+    await sleep(Math.max(1, pollAfterSeconds) * 1000);
+    const task = await notionCall(() =>
+      notion.asyncTasks.retrieve({ task_id: taskId }),
+    ) as AsyncTaskResponse;
+    if (task.status === "succeeded") return task;
+    if (task.status === "failed") {
+      throw new Error(`Notion async task ${taskId} failed: ${task.error.message}`);
+    }
+    logger.debug({ task_id: taskId, status: task.status, attempt: i }, "async task pending");
+  }
+  throw new Error(`Notion async task ${taskId} did not complete within 15 polls`);
+}
 
 async function ensureSelectOptions(dataSourceId: string, opts: { prop: string; value: string; kind: "select" | "multi_select" }[]): Promise<void> {
   for (const o of opts) {
@@ -43,35 +157,17 @@ export async function upsertRepo(proj: RepoProjection): Promise<string> {
       notion.pages.update({ page_id: prev.notion_page_id!, properties: proj.notionProperties as never }),
     );
     if (prev.body_hash !== proj.bodyHash) {
-      await notionCall(() =>
-        notion.pages.updateMarkdown({
-          page_id: prev.notion_page_id!,
-          type: "replace_content",
-          replace_content: { new_str: proj.markdown },
-        }),
-      );
+      await replaceMarkdown(prev.notion_page_id, proj.markdown);
     }
     pageId = prev.notion_page_id;
   } else {
     const existing = await findPageByNodeId(dsId, proj.githubNodeId);
     if (existing) {
       await notionCall(() => notion.pages.update({ page_id: existing, properties: proj.notionProperties as never }));
-      await notionCall(() =>
-        notion.pages.updateMarkdown({
-          page_id: existing,
-          type: "replace_content",
-          replace_content: { new_str: proj.markdown },
-        }),
-      );
+      await replaceMarkdown(existing, proj.markdown);
       pageId = existing;
     } else {
-      const created = await notionCall(() =>
-        notion.pages.create({
-          parent: { data_source_id: dsId },
-          properties: proj.notionProperties as never,
-          markdown: proj.markdown,
-        }),
-      );
+      const created = await createPageWithMarkdown({ data_source_id: dsId }, proj.notionProperties as never, proj.markdown);
       pageId = created.id;
     }
   }
@@ -118,35 +214,17 @@ export async function upsertWorkItem(proj: WorkItemProjection): Promise<string> 
       notion.pages.update({ page_id: prev.notion_page_id!, properties: proj.notionProperties as never }),
     );
     if (prev.body_hash !== proj.bodyHash) {
-      await notionCall(() =>
-        notion.pages.updateMarkdown({
-          page_id: prev.notion_page_id!,
-          type: "replace_content",
-          replace_content: { new_str: proj.markdown },
-        }),
-      );
+      await replaceMarkdown(prev.notion_page_id, proj.markdown);
     }
     pageId = prev.notion_page_id;
   } else {
     const existing = await findPageByNodeId(dsId, proj.githubNodeId);
     if (existing) {
       await notionCall(() => notion.pages.update({ page_id: existing, properties: proj.notionProperties as never }));
-      await notionCall(() =>
-        notion.pages.updateMarkdown({
-          page_id: existing,
-          type: "replace_content",
-          replace_content: { new_str: proj.markdown },
-        }),
-      );
+      await replaceMarkdown(existing, proj.markdown);
       pageId = existing;
     } else {
-      const created = await notionCall(() =>
-        notion.pages.create({
-          parent: { data_source_id: dsId },
-          properties: proj.notionProperties as never,
-          markdown: proj.markdown,
-        }),
-      );
+      const created = await createPageWithMarkdown({ data_source_id: dsId }, proj.notionProperties as never, proj.markdown);
       pageId = created.id;
     }
   }

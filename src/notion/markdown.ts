@@ -13,9 +13,18 @@ import type {
 
 export function sanitizeBody(text: string | null, maxChars: number): string {
   if (!text) return "_No body._";
-  // ponytail: minimal sanitization for v1 — strip nothing semantically, just truncate.
-  // Ceiling: add secret-pattern redaction (AWS keys, tokens) when code sync lands.
-  return truncate(text, maxChars);
+  // Strip HTML constructs Notion's markdown parser can't handle.
+  // ponytail: regex-based strip. Ceiling: proper HTML parser if needed.
+  let s = text;
+  // HTML comments (bot review metadata, hidden annotations)
+  s = s.replace(/<!--[\s\S]*?-->/g, "");
+  // <details>/<summary> unwrap — keep inner content, drop tags
+  s = s.replace(/<\/?(?:details|summary)>/g, "");
+  // Other common HTML tags from bot comments — unwrap to text
+  s = s.replace(/<\/?(?:div|span|section|article|aside|header|footer|nav|main|figure|figcaption|table|thead|tbody|tr|td|th|ul|ol|li|p|br|hr|strong|em|b|i|a|img|code|pre|blockquote|h[1-6])[^>]*>/g, "");
+  // Collapse multiple blank lines from removed tags
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return truncate(s, maxChars);
 }
 
 export function renderIssueBody(params: {
