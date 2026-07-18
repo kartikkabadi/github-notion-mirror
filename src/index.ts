@@ -4,6 +4,8 @@ import { backfillCommand, syncSingle } from "./cli/backfill.ts";
 import { statusCommand } from "./cli/status.ts";
 import { doctorCommand } from "./cli/doctor.ts";
 import { codeCommand } from "./cli/code.ts";
+import { pollReadyIssues } from "./publish.ts";
+import { serveCommand } from "./cli/serve.ts";
 
 const USAGE = `GitHub Notion Mirror
 
@@ -16,10 +18,8 @@ Usage:
   mirror code status                       Show code sync state per repo
   mirror status                            Show queue/state summary
   mirror doctor                            Run health checks
-
-Phase 2+ commands (not yet implemented):
-  mirror serve                             Start reconcile loop (auto-sync)
-  mirror publish                           Poll for Notion→GitHub issue creates
+  mirror publish                           Create GitHub issues from Notion (Publish State=ready)
+  mirror serve                             Start auto-sync reconcile loop (30s interval)
 `;
 
 async function main(): Promise<void> {
@@ -56,10 +56,16 @@ async function main(): Promise<void> {
       case "code":
         await codeCommand(rest);
         break;
+      case "publish": {
+        const result = await pollReadyIssues();
+        console.log(`Publish complete: ${result.created} issues created, ${result.errors} errors.`);
+        break;
+      }
       case "serve":
+        await serveCommand();
+        break;
       case "reconcile":
-      case "publish":
-        console.error(`"${cmd}" is not implemented yet.`);
+        console.error(`"reconcile" is not implemented yet. Use "mirror serve" for the auto-sync loop.`);
         process.exit(1);
       case "--help":
       case "-h":

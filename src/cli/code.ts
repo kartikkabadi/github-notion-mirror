@@ -20,7 +20,7 @@ export async function codeCommand(args: string[]): Promise<void> {
 async function codeSyncCommand(args: string[]): Promise<void> {
   const all = args.includes("--all");
   const repoArg = args.find((a) => a.startsWith("--repo="))?.split("=")[1]
-    ?? args[args.indexOf("--repo") + 1];
+    ?? (args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined);
 
   if (!all && !repoArg) {
     console.error("Usage: mirror code sync --all | --repo owner/name");
