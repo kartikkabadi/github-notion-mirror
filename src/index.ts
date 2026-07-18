@@ -3,20 +3,23 @@ import { initCommand } from "./cli/init.ts";
 import { backfillCommand, syncSingle } from "./cli/backfill.ts";
 import { statusCommand } from "./cli/status.ts";
 import { doctorCommand } from "./cli/doctor.ts";
+import { codeCommand } from "./cli/code.ts";
 
-const USAGE = `GitHub Notion Mirror v1 — Phase 1
+const USAGE = `GitHub Notion Mirror
 
 Usage:
   mirror init                              Validate env + create/ensure Notion DBs
   mirror backfill [--repo owner/name]      Backfill repos, issues, PRs
   mirror sync issue owner/name#n           Sync a single issue
   mirror sync pull owner/name#n            Sync a single PR
+  mirror code sync [--all | --repo o/r]    Sync repo code files to Notion
+  mirror code status                       Show code sync state per repo
   mirror status                            Show queue/state summary
   mirror doctor                            Run health checks
 
 Phase 2+ commands (not yet implemented):
-  mirror serve                             Start webhook server + worker + reconcile
-  mirror reconcile                         One-shot incremental reconcile
+  mirror serve                             Start reconcile loop (auto-sync)
+  mirror publish                           Poll for Notion→GitHub issue creates
 `;
 
 async function main(): Promise<void> {
@@ -50,9 +53,13 @@ async function main(): Promise<void> {
       case "doctor":
         await doctorCommand();
         break;
+      case "code":
+        await codeCommand(rest);
+        break;
       case "serve":
       case "reconcile":
-        console.error(`"${cmd}" is Phase 2/3 — not implemented yet. See docs/AGENT_NOTES.md.`);
+      case "publish":
+        console.error(`"${cmd}" is not implemented yet.`);
         process.exit(1);
       case "--help":
       case "-h":

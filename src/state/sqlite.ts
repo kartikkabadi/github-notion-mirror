@@ -20,10 +20,12 @@ export function getDb(): Database {
 }
 
 function runMigrations(database: Database): void {
-  // ponytail: single-file migration runner; no migration framework needed at v1 scale.
-  // Ceiling: if migrations grow past a handful, switch to a tracked schema_migrations table.
-  const initSql = readFileSync(join(MIGRATIONS_DIR, "001_init.sql"), "utf8");
-  database.exec(initSql);
+  // ponytail: sequential migration runner. Ceiling: tracked schema_migrations table if count grows.
+  const files = ["001_init.sql", "002_code_sync.sql"];
+  for (const f of files) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, f), "utf8");
+    database.exec(sql);
+  }
 }
 
 export type GithubObjectRow = {
@@ -130,4 +132,102 @@ export function closeDb(): void {
     db.close();
     db = null;
   }
+}
+
+// --- Code files ---
+
+export type CodeFileRow = {
+  full_path_key: string;
+  repo_node_id: string;
+  repo_full_name: string;
+  path: string;
+  ref: string;
+  blob_sha: string | null;
+  content_hash: string | null;
+  notion_page_id: string | null;
+  size_bytes: number | null;
+  language: string | null;
+  sync_status: "synced" | "skipped" | "error" | "too_large" | "binary" | "missing";
+  skip_reason: string | null;
+  last_synced_at: string | null;
+};
+
+export function upsertCodeFile(row: CodeFileRow): void {
+  getDb().prepare(`
+    INSERT INTO code_files
+      (full_path_key, repo_node_id, repo_full_name, path, ref, blob_sha, content_hash,
+       notion_page_id, size_bytes, language, sync_status, skip_reason, last_synced_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+    ON CONFLICT(full_path_key) DO UPDATE SET
+      blob_sha=excluded.blob_sha,
+      content_hash=excluded.content_hash,
+      notion_page_id=COALESCE(excluded.notion_page_id, code_files.notion_page_id),
+      size_bytes=excluded.size_bytes,
+      language=excluded.language,
+      sync_status=excluded.sync_status,
+      skip_reason=excluded.skip_reason,
+      last_synced_at=excluded.last_synced_at
+  `).run(
+    row.full_path_key, row.repo_node_id, row.repo_full_name, row.path, row.ref,
+    row.blob_sha, row.content_hash, row.notion_page_id, row.size_bytes,
+    row.language, row.sync_status, row.skip_reason, row.last_synced_at,
+  );
+}
+
+export function getCodeFile(fullPathKey: string): CodeFileRow | null {
+  return getDb().prepare(`SELECT * FROM code_files WHERE full_path_key = ?`).get(fullPathKey) as CodeFileRow | null;
+}
+
+export function listCodeFilesByRepo(repoNodeId: string): CodeFileRow[] {
+  return getDb().prepare(`SELECT * FROM code_files WHERE repo_node_id = ?`).all(repoNodeId) as CodeFileRow[];
+}
+
+export function markCodeFileMissing(fullPathKey: string): void {
+  getDb().prepare(`UPDATE code_files SET sync_status='missing', last_synced_at=? WHERE full_path_key=?`)
+    .run(new Date().toISOString(), fullPathKey);
+}
+
+// --- Repo code state ---
+
+export type RepoCodeStateRow = {
+  repo_node_id: string;
+  repo_full_name: string;
+  head_sha: string | null;
+  tree_sha: string | null;
+  ref: string | null;
+  last_full_scan_at: string | null;
+  file_count: number | null;
+  synced_count: number | null;
+  skipped_count: number | null;
+  sync_status: "idle" | "syncing" | "ready" | "partial" | "error";
+  last_error: string | null;
+};
+
+export function upsertRepoCodeState(row: Partial<RepoCodeStateRow> & { repo_node_id: string; repo_full_name: string }): void {
+  getDb().prepare(`
+    INSERT INTO repo_code_state
+      (repo_node_id, repo_full_name, head_sha, tree_sha, ref, last_full_scan_at,
+       file_count, synced_count, skipped_count, sync_status, last_error)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+    ON CONFLICT(repo_node_id) DO UPDATE SET
+      repo_full_name=excluded.repo_full_name,
+      head_sha=COALESCE(excluded.head_sha, repo_code_state.head_sha),
+      tree_sha=COALESCE(excluded.tree_sha, repo_code_state.tree_sha),
+      ref=COALESCE(excluded.ref, repo_code_state.ref),
+      last_full_scan_at=COALESCE(excluded.last_full_scan_at, repo_code_state.last_full_scan_at),
+      file_count=COALESCE(excluded.file_count, repo_code_state.file_count),
+      synced_count=COALESCE(excluded.synced_count, repo_code_state.synced_count),
+      skipped_count=COALESCE(excluded.skipped_count, repo_code_state.skipped_count),
+      sync_status=excluded.sync_status,
+      last_error=excluded.last_error
+  `).run(
+    row.repo_node_id, row.repo_full_name, row.head_sha ?? null, row.tree_sha ?? null,
+    row.ref ?? null, row.last_full_scan_at ?? null, row.file_count ?? null,
+    row.synced_count ?? null, row.skipped_count ?? null, row.sync_status ?? "idle",
+    row.last_error ?? null,
+  );
+}
+
+export function getRepoCodeState(repoNodeId: string): RepoCodeStateRow | null {
+  return getDb().prepare(`SELECT * FROM repo_code_state WHERE repo_node_id = ?`).get(repoNodeId) as RepoCodeStateRow | null;
 }

@@ -36,6 +36,15 @@ const ConfigSchema = z.object({
   MAX_BODY_CHARS: z.coerce.number().default(100000),
   MAX_CHANGED_FILES_LISTED: z.coerce.number().default(100),
   MAPPER_VERSION: z.coerce.number().default(1),
+
+  // Code sync
+  CODE_MAX_FILE_BYTES: z.coerce.number().default(200_000),
+  CODE_MAX_FILES_PER_REPO: z.coerce.number().default(5000),
+  CODE_EXCLUDE_DIRS: z.string().default("node_modules,dist,build,.git,vendor,target,.next,coverage,.turbo,out,bin,obj"),
+  CODE_EXCLUDE_EXTS: z.string().default(".png,.jpg,.jpeg,.gif,.webp,.ico,.pdf,.zip,.gz,.wasm,.mp4,.woff,.woff2,.ttf,.eot,.otf,.parquet,.bin,.exe,.dll,.so,.dylib,.min.js,.min.css,.map,.lock,.sum"),
+  CODE_TEXT_EXTS: z.string().default(".ts,.tsx,.js,.jsx,.mjs,.cjs,.json,.md,.mdx,.py,.go,.rs,.java,.kt,.swift,.rb,.php,.yml,.yaml,.toml,.ini,.env.example,.css,.scss,.html,.svg,.sql,.sh,.bash,.c,.h,.cpp,.hpp,.cs,.fs,.vue,.svelte,.txt,.gitignore,.dockerfile,.editorconfig"),
+  CODE_EXCLUDE_FILES: z.string().default("package-lock.json,pnpm-lock.yaml,yarn.lock,Cargo.lock,go.sum,Gemfile.lock,composer.lock,Pipfile.lock,poetry.lock,.env,.env.local,.env.production,.env.staging"),
+  RECONCILE_INTERVAL_SECONDS: z.coerce.number().default(30),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

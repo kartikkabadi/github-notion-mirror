@@ -176,7 +176,7 @@ export async function upsertRepo(proj: RepoProjection): Promise<string> {
     github_node_id: proj.githubNodeId,
     object_type: "repository",
     repo_node_id: null,
-    repo_full_name: null,
+    repo_full_name: proj.fullName,
     number: null,
     github_updated_at: proj.githubUpdatedAt,
     source_hash: proj.sourceHash,

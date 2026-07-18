@@ -238,3 +238,111 @@ export function logLoaderError(target: string, err: unknown): void {
   const e = err as { status?: number; message?: string };
   logger.error({ target, status: e?.status, message: e?.message }, "github load failed");
 }
+
+// --- Code sync: tree fetch + blob fetch + filter ---
+
+export type TreeEntry = {
+  path: string;
+  mode: string;
+  type: "blob" | "tree" | "commit";
+  sha: string;
+  size?: number;
+};
+
+export type RepoTree = {
+  treeSha: string;
+  entries: TreeEntry[];
+  truncated: boolean;
+};
+
+export async function fetchRepoTree(owner: string, repo: string, ref?: string): Promise<RepoTree> {
+  const ok = getOctokit();
+  // Resolve ref to commit sha → tree sha
+  const branch = ref ?? (await ok.rest.repos.get({ owner, repo })).data.default_branch;
+  const refRes = await ok.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+  const commitSha = refRes.data.object.sha;
+  const commitRes = await ok.rest.git.getCommit({ owner, repo, commit_sha: commitSha });
+  const treeSha = commitRes.data.tree.sha;
+
+  const treeRes = await ok.rest.git.getTree({ owner, repo, tree_sha: treeSha, recursive: "1" });
+  const entries = (treeRes.data.tree as unknown as TreeEntry[]).filter((e) => e.type === "blob");
+  return { treeSha, entries, truncated: treeRes.data.truncated ?? false };
+}
+
+export async function fetchBlob(owner: string, repo: string, blobSha: string): Promise<{ content: string; size: number }> {
+  const ok = getOctokit();
+  const blob = await ok.rest.git.getBlob({ owner, repo, file_sha: blobSha });
+  const content = Buffer.from(blob.data.content, "base64").toString("utf8");
+  return { content, size: blob.data.size ?? 0 };
+}
+
+export type FileFilterConfig = {
+  maxFileBytes: number;
+  maxFiles: number;
+  excludeDirs: string[];
+  excludeExts: string[];
+  excludeFiles: string[];
+  textExts: string[];
+};
+
+export function filterTreeEntries(entries: TreeEntry[], cfg: FileFilterConfig): { included: TreeEntry[]; skipped: { entry: TreeEntry; reason: string }[] } {
+  const excludeDirSet = new Set(cfg.excludeDirs);
+  const excludeExtSet = new Set(cfg.excludeExts);
+  const excludeFileSet = new Set(cfg.excludeFiles);
+  const textExtSet = new Set(cfg.textExts);
+
+  const included: TreeEntry[] = [];
+  const skipped: { entry: TreeEntry; reason: string }[] = [];
+
+  for (const entry of entries) {
+    const path = entry.path;
+    const segments = path.split("/");
+    const fileName = segments[segments.length - 1]!;
+    const ext = fileName.includes(".") ? "." + fileName.split(".").pop()!.toLowerCase() : "";
+
+    // Check exclude dirs
+    if (segments.some((s) => excludeDirSet.has(s))) {
+      skipped.push({ entry, reason: "excluded dir" });
+      continue;
+    }
+    // Check exclude files
+    if (excludeFileSet.has(fileName)) {
+      skipped.push({ entry, reason: "excluded file" });
+      continue;
+    }
+    // Check exclude extensions
+    if (excludeExtSet.has(ext)) {
+      skipped.push({ entry, reason: "excluded ext" });
+      continue;
+    }
+    // Check text extensions allowlist
+    if (ext && !textExtSet.has(ext)) {
+      skipped.push({ entry, reason: "non-text ext" });
+      continue;
+    }
+    // Check size
+    if (entry.size && entry.size > cfg.maxFileBytes) {
+      skipped.push({ entry, reason: "too large" });
+      continue;
+    }
+    included.push(entry);
+    if (included.length >= cfg.maxFiles) break;
+  }
+
+  return { included, skipped };
+}
+
+export function languageFromPath(path: string): string {
+  const ext = path.includes(".") ? "." + path.split(".").pop()!.toLowerCase() : "";
+  const map: Record<string, string> = {
+    ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript",
+    ".mjs": "JavaScript", ".cjs": "JavaScript", ".py": "Python", ".go": "Go", ".rs": "Rust",
+    ".java": "Java", ".kt": "Kotlin", ".swift": "Swift", ".rb": "Ruby", ".php": "PHP",
+    ".css": "CSS", ".scss": "SCSS", ".html": "HTML", ".svg": "SVG", ".sql": "SQL",
+    ".sh": "Shell", ".bash": "Shell", ".c": "C", ".h": "C", ".cpp": "C++", ".hpp": "C++",
+    ".cs": "C#", ".fs": "F#", ".vue": "Vue", ".svelte": "Svelte", ".json": "JSON",
+    ".md": "Markdown", ".mdx": "MDX", ".yml": "YAML", ".yaml": "YAML", ".toml": "TOML",
+    ".ini": "INI", ".txt": "Text",
+  };
+  return map[ext] ?? "Other";
+}

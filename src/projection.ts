@@ -65,6 +65,7 @@ function titleVal(s: string): PropVal {
 
 export type RepoProjection = {
   githubNodeId: string;
+  fullName: string;
   notionProperties: Record<string, PropVal>;
   markdown: string;
   githubUpdatedAt: string;
@@ -147,6 +148,7 @@ export function projectRepo(repo: RepoData, notionPageId?: string): RepoProjecti
 
   return {
     githubNodeId: repo.node_id,
+    fullName: repo.full_name,
     notionProperties: properties,
     markdown,
     githubUpdatedAt: repo.updated_at,
