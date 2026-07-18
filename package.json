@@ -1,0 +1,35 @@
+{
+  "name": "github-notion-mirror",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Local one-way GitHub→Notion mirror for repos, issues, and pull requests.",
+  "bin": {
+    "mirror": "src/index.ts"
+  },
+  "scripts": {
+    "init": "bun src/index.ts init",
+    "backfill": "bun src/index.ts backfill",
+    "serve": "bun src/index.ts serve",
+    "reconcile": "bun src/index.ts reconcile",
+    "status": "bun src/index.ts status",
+    "doctor": "bun src/index.ts doctor",
+    "sync": "bun src/index.ts sync",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@notionhq/client": "5.23.0",
+    "octokit": "5.0.5",
+    "pino": "10.3.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

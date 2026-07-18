@@ -1,0 +1,17 @@
+# Optional config overlay. Copy to config.toml (gitignored) to override defaults.
+# .env takes precedence for secrets; this file is for policy knobs.
+
+include_forks = true
+include_archived = false
+backfill_include_closed = false
+reconcile_interval_minutes = 15
+max_notion_rps = 2
+max_job_attempts = 8
+max_comments_per_item = 50
+max_body_chars = 100000
+max_changed_files_listed = 100
+bind_host = "127.0.0.1"
+port = 4317
+
+# Optional repo allowlist (empty = all installation repos)
+# repo_allowlist = ["owner/repo", "owner/other"]
