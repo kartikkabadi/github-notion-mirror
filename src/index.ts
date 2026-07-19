@@ -19,7 +19,7 @@ Usage:
   mirror status                            Show queue/state summary
   mirror doctor                            Run health checks
   mirror publish                           Create GitHub issues from Notion (Publish State=ready)
-  mirror serve                             Start auto-sync reconcile loop (30s interval)
+  mirror serve                             Start auto-sync reconcile loop (5s interval)
 `;
 
 async function main(): Promise<void> {

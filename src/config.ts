@@ -44,7 +44,7 @@ const ConfigSchema = z.object({
   CODE_EXCLUDE_EXTS: z.string().default(".png,.jpg,.jpeg,.gif,.webp,.ico,.pdf,.zip,.gz,.wasm,.mp4,.woff,.woff2,.ttf,.eot,.otf,.parquet,.bin,.exe,.dll,.so,.dylib,.min.js,.min.css,.map,.lock,.sum"),
   CODE_TEXT_EXTS: z.string().default(".ts,.tsx,.js,.jsx,.mjs,.cjs,.json,.md,.mdx,.py,.go,.rs,.java,.kt,.swift,.rb,.php,.yml,.yaml,.toml,.ini,.env.example,.css,.scss,.html,.svg,.sql,.sh,.bash,.c,.h,.cpp,.hpp,.cs,.fs,.vue,.svelte,.txt,.gitignore,.dockerfile,.editorconfig"),
   CODE_EXCLUDE_FILES: z.string().default("package-lock.json,pnpm-lock.yaml,yarn.lock,Cargo.lock,go.sum,Gemfile.lock,composer.lock,Pipfile.lock,poetry.lock,.env,.env.local,.env.production,.env.staging"),
-  RECONCILE_INTERVAL_SECONDS: z.coerce.number().default(30),
+  RECONCILE_INTERVAL_SECONDS: z.coerce.number().default(5),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

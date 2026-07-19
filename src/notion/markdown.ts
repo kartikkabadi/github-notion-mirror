@@ -144,11 +144,10 @@ export function renderPullBody(params: {
   lines.push("");
   lines.push("## Diffs");
   lines.push("");
-  // ponytail: include patch content per file, capped at 30 files with diffs.
-  // Ceiling: if patches are huge, use async markdown or separate pages per file.
-  const maxDiffFiles = Math.min(30, maxFiles);
+  // ponytail: include full patch content per file. No artificial cap — let Notion's
+  // async markdown + 500KB hard cap in upsert.ts be the natural limit.
   const filesWithPatches = files.filter((f) => f.patch);
-  const diffFiles = filesWithPatches.slice(0, maxDiffFiles);
+  const diffFiles = filesWithPatches.slice(0, maxFiles);
   if (diffFiles.length === 0) {
     lines.push("_No diff content available._");
   } else {
@@ -156,9 +155,7 @@ export function renderPullBody(params: {
       lines.push(`### ${escapeTable(f.filename)}`);
       lines.push("");
       lines.push("```diff");
-      // ponytail: cap each file's diff at 5K chars to keep total body under Notion limits.
-      // Ceiling: smarter truncation that keeps context around changed lines.
-      lines.push(sanitizeBody(f.patch, 5_000));
+      lines.push(sanitizeBody(f.patch, 100_000));
       lines.push("```");
       lines.push("");
     }
