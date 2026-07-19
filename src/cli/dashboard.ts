@@ -24,7 +24,7 @@ export async function dashboardCommand(args: string[]): Promise<void> {
     process.stdin.resume();
 
     let scroll = 0;
-    let needsRender = true;
+    let lastAutoRender = Date.now();
 
     const cleanup = () => {
       process.stdout.write("\x1b[?25h\x1b[?1049l");
@@ -34,34 +34,33 @@ export async function dashboardCommand(args: string[]): Promise<void> {
     process.on("exit", cleanup);
     process.on("SIGINT", cleanup);
 
+    const render = () => {
+      const lines = renderDashboard({ starsOnly, ownedOnly, all, scroll });
+      process.stdout.write("\x1b[H\x1b[2J" + lines.join("\n") + "\n");
+    };
+
     // Key handler: scroll with arrows, quit with q/Ctrl+C
     process.stdin.on("data", (buf: Buffer) => {
       const s = buf.toString();
-      // q or Ctrl+C
-      if (s === "q" || s === "Q" || s === "\x03") {
-        cleanup();
-      }
-      // Arrow keys: \x1b[A = up, \x1b[B = down
-      // Page up/down: \x1b[5~ / \x1b[6~
-      // Home/End: \x1b[H / \x1b[F
-      if (s === "\x1b[A" || s === "k") { scroll = Math.max(0, scroll - 1); needsRender = true; }
-      if (s === "\x1b[B" || s === "j") { scroll++; needsRender = true; }
-      if (s === "\x1b[5~") { scroll = Math.max(0, scroll - 10); needsRender = true; }
-      if (s === "\x1b[6~") { scroll += 10; needsRender = true; }
-      if (s === "\x1b[H" || s === "g") { scroll = 0; needsRender = true; }
-      if (s === "\x1b[F" || s === "G") { scroll = 99999; needsRender = true; }
+      if (s === "q" || s === "Q" || s === "\x03") cleanup();
+      if (s === "\x1b[A" || s === "k") { scroll = Math.max(0, scroll - 1); render(); }
+      if (s === "\x1b[B" || s === "j") { scroll++; render(); }
+      if (s === "\x1b[5~") { scroll = Math.max(0, scroll - 10); render(); }
+      if (s === "\x1b[6~") { scroll += 10; render(); }
+      if (s === "\x1b[H" || s === "g") { scroll = 0; render(); }
+      if (s === "\x1b[F" || s === "G") { scroll = 99999; render(); }
     });
 
+    // Initial render
+    render();
+
+    // Auto-refresh loop: poll at 50ms so keypresses feel instant
     while (true) {
-      if (needsRender) {
-        const lines = renderDashboard({ starsOnly, ownedOnly, all, scroll });
-        process.stdout.write("\x1b[H\x1b[2J" + lines.join("\n") + "\n");
-        needsRender = false;
+      await sleep(50);
+      if (Date.now() - lastAutoRender >= interval * 1000) {
+        render();
+        lastAutoRender = Date.now();
       }
-      await sleep(interval * 1000);
-      // Auto-render every interval even without keypress
-      const lines = renderDashboard({ starsOnly, ownedOnly, all, scroll });
-      process.stdout.write("\x1b[H\x1b[2J" + lines.join("\n") + "\n");
     }
   } else {
     const lines = renderDashboard({ starsOnly, ownedOnly, all });
