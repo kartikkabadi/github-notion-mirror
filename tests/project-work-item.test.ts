@@ -187,7 +187,7 @@ describe("projectPull merged vs closed", () => {
       issueComments: [],
       reviews: [],
       reviewComments: [],
-      files: [{ filename: "src/x.ts", status: "modified", additions: 5, deletions: 1 }],
+      files: [{ filename: "src/x.ts", status: "modified", additions: 5, deletions: 1, patch: "@@ -1,3 +1,5 @@\n+new line\n+another line" }],
     });
     expect(proj.markdown).toContain("## Changes");
     expect(proj.markdown).toContain("src/x.ts");

@@ -310,7 +310,7 @@ export function projectPull(
     additions: pull.additions,
     deletions: pull.deletions,
     changed_files: pull.changed_files,
-    files: enrichment.files.map((f) => ({ path: f.filename, status: f.status, a: f.additions, d: f.deletions })),
+    files: enrichment.files.map((f) => ({ path: f.filename, status: f.status, a: f.additions, d: f.deletions, patch: f.patch?.slice(0, 5000) })),
     conversation: [
       ...enrichment.issueComments.map((c) => ({ id: c.id, body: c.body, updated: c.updated_at, author: c.user?.login, kind: "issue_comment" })),
       ...enrichment.reviews.map((r) => ({ id: r.id, body: r.body, updated: r.submitted_at, author: r.user?.login, kind: `review:${r.state}` })),

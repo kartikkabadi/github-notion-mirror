@@ -100,6 +100,7 @@ export type PullFileData = {
   status: string;
   additions: number;
   deletions: number;
+  patch: string | null;
 };
 
 type PaginableResponse<T> = { data: T[]; headers: { link?: string } };

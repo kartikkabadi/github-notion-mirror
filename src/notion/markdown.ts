@@ -142,6 +142,32 @@ export function renderPullBody(params: {
     }
   }
   lines.push("");
+  lines.push("## Diffs");
+  lines.push("");
+  // ponytail: include patch content per file, capped at 30 files with diffs.
+  // Ceiling: if patches are huge, use async markdown or separate pages per file.
+  const maxDiffFiles = Math.min(30, maxFiles);
+  const filesWithPatches = files.filter((f) => f.patch);
+  const diffFiles = filesWithPatches.slice(0, maxDiffFiles);
+  if (diffFiles.length === 0) {
+    lines.push("_No diff content available._");
+  } else {
+    for (const f of diffFiles) {
+      lines.push(`### ${escapeTable(f.filename)}`);
+      lines.push("");
+      lines.push("```diff");
+      // ponytail: cap each file's diff at 5K chars to keep total body under Notion limits.
+      // Ceiling: smarter truncation that keeps context around changed lines.
+      lines.push(sanitizeBody(f.patch, 5_000));
+      lines.push("```");
+      lines.push("");
+    }
+    if (diffFiles.length < filesWithPatches.length) {
+      lines.push(`_…${filesWithPatches.length - diffFiles.length} more files with diffs_`);
+      lines.push("");
+    }
+  }
+  lines.push("");
   lines.push(`> Full diff lives on GitHub: ${pull.html_url}/files`);
   lines.push("");
   appendSyncSection(lines, nodeId, updatedAt, sourceHash, mapperVersion);
