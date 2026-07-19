@@ -18,20 +18,50 @@ export async function dashboardCommand(args: string[]): Promise<void> {
   const all = args.includes("--all") || (!starsOnly && !ownedOnly);
 
   if (watch) {
-    // Hide cursor, enter alternate screen
+    // Enter alternate screen, hide cursor, enable raw mode for key capture
     process.stdout.write("\x1b[?1049h\x1b[?25l");
-    process.on("exit", () => {
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    let scroll = 0;
+    let needsRender = true;
+
+    const cleanup = () => {
       process.stdout.write("\x1b[?25h\x1b[?1049l");
-    });
-    process.on("SIGINT", () => {
-      process.stdout.write("\x1b[?25h\x1b[?1049l");
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.exit(0);
+    };
+    process.on("exit", cleanup);
+    process.on("SIGINT", cleanup);
+
+    // Key handler: scroll with arrows, quit with q/Ctrl+C
+    process.stdin.on("data", (buf: Buffer) => {
+      const s = buf.toString();
+      // q or Ctrl+C
+      if (s === "q" || s === "Q" || s === "\x03") {
+        cleanup();
+      }
+      // Arrow keys: \x1b[A = up, \x1b[B = down
+      // Page up/down: \x1b[5~ / \x1b[6~
+      // Home/End: \x1b[H / \x1b[F
+      if (s === "\x1b[A" || s === "k") { scroll = Math.max(0, scroll - 1); needsRender = true; }
+      if (s === "\x1b[B" || s === "j") { scroll++; needsRender = true; }
+      if (s === "\x1b[5~") { scroll = Math.max(0, scroll - 10); needsRender = true; }
+      if (s === "\x1b[6~") { scroll += 10; needsRender = true; }
+      if (s === "\x1b[H" || s === "g") { scroll = 0; needsRender = true; }
+      if (s === "\x1b[F" || s === "G") { scroll = 99999; needsRender = true; }
     });
 
     while (true) {
-      const lines = renderDashboard({ starsOnly, ownedOnly, all });
-      process.stdout.write("\x1b[?1049h\x1b[H\x1b[2J" + lines.join("\n") + "\n");
+      if (needsRender) {
+        const lines = renderDashboard({ starsOnly, ownedOnly, all, scroll });
+        process.stdout.write("\x1b[H\x1b[2J" + lines.join("\n") + "\n");
+        needsRender = false;
+      }
       await sleep(interval * 1000);
+      // Auto-render every interval even without keypress
+      const lines = renderDashboard({ starsOnly, ownedOnly, all, scroll });
+      process.stdout.write("\x1b[H\x1b[2J" + lines.join("\n") + "\n");
     }
   } else {
     const lines = renderDashboard({ starsOnly, ownedOnly, all });
@@ -43,7 +73,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: boolean }): string[] {
+function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: boolean; scroll?: number }): string[] {
+  const scroll = filter.scroll ?? 0;
   const repos = filter.starsOnly
     ? listReposBySource("starred")
     : filter.ownedOnly
@@ -137,9 +168,11 @@ function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: 
   );
   lines.push(`  ${dim("─".repeat(colRepo + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 6 + 2 + 10 + 2 + 7 + 2 + 12))}`);
 
-  // Table rows
-  const maxRows = process.stdout.rows && process.stdout.rows > 10 ? process.stdout.rows - 18 : 40;
-  for (const { repo, state } of rows.slice(0, maxRows)) {
+  // Table rows — scrollable in --watch mode
+  const maxRows = process.stdout.rows && process.stdout.rows > 10 ? process.stdout.rows - 20 : 40;
+  const effectiveScroll = Math.min(scroll, Math.max(0, rows.length - maxRows));
+  const visibleRows = rows.slice(effectiveScroll, effectiveScroll + maxRows);
+  for (const { repo, state } of visibleRows) {
     const fullName = repo.repo_full_name ?? "?";
     const name = pad(fullName.length > colRepo ? fullName.slice(0, colRepo - 1) + "…" : fullName, colRepo);
     const status = statusColored(state?.sync_status ?? "none");
@@ -154,7 +187,9 @@ function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: 
   }
 
   if (rows.length > maxRows) {
-    lines.push(`  ${dim("… " + (rows.length - maxRows) + " more repos (use --watch to scroll)")}`);
+    const from = effectiveScroll + 1;
+    const to = Math.min(effectiveScroll + maxRows, rows.length);
+    lines.push(`  ${dim(`Showing ${from}-${to} of ${rows.length}  ↑↓/jk scroll  PgUp/PgDn  g/G top/bottom  q quit`)}`);
   }
 
   // Errors section
@@ -169,7 +204,11 @@ function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: 
 
   // Footer
   lines.push("");
-  lines.push(`  ${dim("mirror dashboard --watch  for live view  |  q or Ctrl+C to exit")}`);
+  if (filter.scroll !== undefined) {
+    lines.push(`  ${dim("↑↓/jk scroll  PgUp/PgDn jump  g/G top/bottom  q quit")}`);
+  } else {
+    lines.push(`  ${dim("mirror dashboard --watch  for live scrollable view")}`);
+  }
 
   return lines;
 }
