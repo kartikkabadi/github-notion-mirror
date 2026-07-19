@@ -13,6 +13,17 @@ export function statusCommand(): void {
   console.log(`Repos data source:    ${reposDs || "(not set — run init)"}`);
   console.log(`Work items data src:  ${workDs || "(not set — run init)"}`);
   console.log(`Last reconcile:       ${lastReconcile ?? "(never)"}`);
+
+  // Star code sync progress
+  const starsTotal = getMeta("stars_code_total");
+  if (starsTotal) {
+    const starsDone = getMeta("stars_code_done") ?? "0";
+    const starsCurrent = getMeta("stars_code_current") ?? "";
+    const remaining = Math.max(0, Number(starsTotal) - Number(starsDone));
+    console.log(`Star code sync:       ${starsDone}/${starsTotal} done, ${remaining} remaining`);
+    if (starsCurrent) console.log(`  Current repo:       ${starsCurrent}`);
+  }
+
   console.log(`\nErrors / missing (last 20):`);
   if (errors.length === 0) {
     console.log("  none");

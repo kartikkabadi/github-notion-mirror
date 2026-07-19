@@ -13,10 +13,13 @@ export async function repairCommand(args: string[]): Promise<void> {
     await repairRepoRollups();
   } else if (sub === "work-item-origins") {
     await repairWorkItemOrigins();
+  } else if (sub === "repo-sources") {
+    await repairRepoSources();
   } else {
     console.log(`Usage:
   mirror repair repo-rollups         Fix Notion repo code rollup fields (Code HEAD SHA, File Count, etc.)
   mirror repair work-item-origins    Fix missing Origin/Publish State on GitHub-sourced work items
+  mirror repair repo-sources         Backfill Source property on Notion repo pages from SQLite
 `);
   }
 }
@@ -125,4 +128,39 @@ async function repairWorkItemOrigins(): Promise<void> {
   } while (cursor);
 
   console.log(`\nRepair complete: ${fixed} work items fixed (out of ${checked} checked).`);
+}
+
+// Backfill Source property on Notion repo pages from SQLite repo_source.
+// Older repos were synced before the Source property existed; their Notion pages
+// have Source=null even though SQLite has repo_source=owned.
+async function repairRepoSources(): Promise<void> {
+  const repos = listRepos();
+  const notion = getNotion();
+  let fixed = 0;
+  let skipped = 0;
+
+  console.log(`Repairing Source property on ${repos.length} repo pages...\n`);
+
+  for (const repo of repos) {
+    if (!repo.notion_page_id || !repo.repo_full_name) {
+      skipped++;
+      continue;
+    }
+    const source = repo.repo_source ?? "owned";
+    try {
+      await notionCall(() =>
+        notion.pages.update({
+          page_id: repo.notion_page_id!,
+          properties: {
+            Source: { select: { name: source } },
+          } as never,
+        }),
+      );
+      fixed++;
+    } catch (err) {
+      console.error(`  ✗ ${repo.repo_full_name}: ${(err as Error).message}`);
+    }
+  }
+
+  console.log(`\nRepair complete: ${fixed} fixed, ${skipped} skipped.`);
 }

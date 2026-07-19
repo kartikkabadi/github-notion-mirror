@@ -86,13 +86,14 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
   }
 
   const { included, skipped } = filterTreeEntries(tree.entries, filterCfg);
-  logger.info({ repo: repo.full_name, total: tree.entries.length, included: included.length, skipped: skipped.length, truncated: tree.truncated }, "code tree filtered");
+  const capped = included.length >= cfg.CODE_MAX_FILES_PER_REPO || tree.truncated;
+  logger.info({ repo: repo.full_name, total: tree.entries.length, included: included.length, skipped: skipped.length, truncated: tree.truncated, capped }, "code tree filtered");
 
   // Check if HEAD sha changed — if not, skip everything
   const prev = getRepoCodeState(repo.node_id);
-  if (prev?.head_sha && prev.head_sha === tree.treeSha && prev.sync_status === "ready") {
+  if (prev?.head_sha && prev.head_sha === tree.treeSha && (prev.sync_status === "ready" || (prev.sync_status === "partial" && capped))) {
     logger.info({ repo: repo.full_name }, "code HEAD unchanged, skipping");
-    upsertRepoCodeState({ repo_node_id: repo.node_id, repo_full_name: repo.full_name, sync_status: "ready", last_full_scan_at: nowIso() });
+    upsertRepoCodeState({ repo_node_id: repo.node_id, repo_full_name: repo.full_name, sync_status: capped ? "partial" : "ready", last_full_scan_at: nowIso(), last_error: capped ? "file cap reached" : null });
     return { synced: 0, skipped: included.length, errors: 0 };
   }
 
@@ -236,6 +237,9 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
     // ponytail: skip missing-file detection on first scan (no previous state)
   }
 
+  const finalStatus = errors > 0 || capped ? "partial" : "ready";
+  const finalError = errors > 0 ? `${errors} files failed` : capped ? "file cap reached" : null;
+
   upsertRepoCodeState({
     repo_node_id: repo.node_id,
     repo_full_name: repo.full_name,
@@ -246,8 +250,8 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
     file_count: included.length,
     synced_count: synced,
     skipped_count: skipped.length,
-    sync_status: errors > 0 ? "partial" : "ready",
-    last_error: errors > 0 ? `${errors} files failed` : null,
+    sync_status: finalStatus,
+    last_error: finalError,
   });
 
   // Update Notion repo page with code rollup fields
@@ -255,7 +259,7 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
     await updateRepoCodeRollup(repo.notion_page_id, {
       headSha: tree.treeSha,
       fileCount: included.length,
-      syncStatus: errors > 0 ? "partial" : "ready",
+      syncStatus: finalStatus,
       lastSynced: nowIso(),
     });
   }

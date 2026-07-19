@@ -106,6 +106,19 @@ function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: 
   lines.push(`  ${bold("Files:")}     ${totalSynced.toLocaleString()} synced  ${dim(`${totalSkipped.toLocaleString()} skipped  /  ${totalFiles.toLocaleString()} total`)}`);
   lines.push(`  ${bold("Daemon:")}    ${daemonRunning ? green("running") : red("stopped")}  ${dim("last reconcile: " + (lastReconcile ? timeAgo(lastReconcile) : "never"))}`);
   lines.push(`  ${bold("Stars:")}     ${dim("last refresh: " + (lastStarRefresh ? timeAgo(lastStarRefresh) : "never"))}`);
+
+  // Star code sync progress
+  const starsTotal = getMeta("stars_code_total");
+  if (starsTotal) {
+    const starsDone = getMeta("stars_code_done") ?? "0";
+    const starsCurrent = getMeta("stars_code_current") ?? "";
+    const starsError = getMeta("stars_code_last_error");
+    const remaining = Math.max(0, Number(starsTotal) - Number(starsDone));
+    const starsPct = Math.round((Number(starsDone) / Number(starsTotal)) * 100);
+    lines.push(`  ${bold("Star Sync:")}  ${green(starsDone)}/${starsTotal} repos ${dim(`(${starsPct}%, ${remaining} remaining)`)}${starsCurrent ? "  " + dim(starsCurrent.slice(0, 30)) : ""}`);
+    if (starsError) lines.push(`  ${bold("Last Err:")}   ${red(starsError.slice(0, 60))}`);
+  }
+
   lines.push(`  ${bold("Notion:")}    ${dim("repos=" + (reposDs?.slice(0, 8) ?? "—") + " work=" + (workDs?.slice(0, 8) ?? "—") + " code=" + (codeDs?.slice(0, 8) ?? "—"))}`);
   lines.push("");
 

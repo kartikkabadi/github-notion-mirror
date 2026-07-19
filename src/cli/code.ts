@@ -1,4 +1,4 @@
-import { listRepos, listReposBySource, getRepoCodeState } from "../state/sqlite.ts";
+import { listRepos, listReposBySource, getRepoCodeState, setMeta, getMeta } from "../state/sqlite.ts";
 import { syncRepoCode } from "../code-sync.ts";
 import { logger } from "../logging.ts";
 
@@ -47,6 +47,30 @@ async function codeSyncCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Sort starred repos by size ascending so one huge star doesn't block hundreds.
+  // ponytail: GitHub doesn't give us repo size in the SQLite row, so we sort by
+  // existing code state file_count (already-synced repos first), then by name.
+  // Ceiling: fetch repo size from GitHub API for true size-ascending order.
+  if (starsOnly) {
+    targets.sort((a, b) => {
+      const sa = getRepoCodeState(a.github_node_id);
+      const sb = getRepoCodeState(b.github_node_id);
+      // Repos without code state first (need syncing), sorted by name
+      if (!sa && sb) return -1;
+      if (sa && !sb) return 1;
+      if (!sa && !sb) return (a.repo_full_name ?? "").localeCompare(b.repo_full_name ?? "");
+      // Both have state — sort by file count ascending
+      return (sa!.file_count ?? 0) - (sb!.file_count ?? 0);
+    });
+  }
+
+  // For star sync: persist progress counters so restart resumes cleanly.
+  if (starsOnly) {
+    setMeta("stars_code_total", String(targets.length));
+    setMeta("stars_code_done", "0");
+    setMeta("stars_code_current", "");
+  }
+
   console.log(`Code syncing ${targets.length} repo(s)...\n`);
 
   let totalSynced = 0;
@@ -58,6 +82,8 @@ async function codeSyncCommand(args: string[]): Promise<void> {
     if (!repo.repo_full_name) continue;
     const [owner, name] = repo.repo_full_name.split("/");
     if (!owner || !name) continue;
+
+    if (starsOnly) setMeta("stars_code_current", repo.repo_full_name);
 
     console.log(`== ${repo.repo_full_name} ==`);
     try {
@@ -75,10 +101,14 @@ async function codeSyncCommand(args: string[]): Promise<void> {
     } catch (err) {
       console.log(`  FAILED: ${(err as Error).message}`);
       totalErrors++;
+      if (starsOnly) setMeta("stars_code_last_error", `${repo.repo_full_name}: ${(err as Error).message}`);
     }
     reposDone++;
+    if (starsOnly) setMeta("stars_code_done", String(reposDone));
     if (reposDone % 10 === 0) console.log(`\n--- ${reposDone}/${targets.length} repos done ---\n`);
   }
+
+  if (starsOnly) setMeta("stars_code_current", "");
 
   console.log(`\nCode sync complete: ${totalSynced} files synced, ${totalSkipped} skipped, ${totalErrors} errors across ${targets.length} repos.`);
 }
@@ -86,6 +116,20 @@ async function codeSyncCommand(args: string[]): Promise<void> {
 async function codeStatusCommand(): Promise<void> {
   const repos = listRepos();
   console.log("Code sync status:\n");
+
+  // Star code progress
+  const starsTotal = getMeta("stars_code_total");
+  if (starsTotal) {
+    const starsDone = getMeta("stars_code_done") ?? "0";
+    const starsCurrent = getMeta("stars_code_current") ?? "";
+    const starsError = getMeta("stars_code_last_error");
+    const remaining = Math.max(0, Number(starsTotal) - Number(starsDone));
+    console.log(`Star code sync: ${starsDone}/${starsTotal} done, ${remaining} remaining`);
+    if (starsCurrent) console.log(`  Current: ${starsCurrent}`);
+    if (starsError) console.log(`  Last error: ${starsError.slice(0, 100)}`);
+    console.log();
+  }
+
   for (const repo of repos) {
     if (!repo.repo_full_name) continue;
     const state = getRepoCodeState(repo.github_node_id);

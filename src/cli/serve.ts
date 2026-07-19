@@ -18,6 +18,8 @@ import {
 import { projectRepo, projectIssue, projectPull } from "../projection.ts";
 import { upsertRepo, upsertWorkItem, markObjectError } from "../notion/upsert.ts";
 import { logger } from "../logging.ts";
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 // Reconcile loop: runs every N seconds, doing incremental sync of:
 // 1. Notion → GitHub issue creation (Publish State = ready)
@@ -25,25 +27,61 @@ import { logger } from "../logging.ts";
 // 3. Code sync (only repos whose pushed_at changed since last cycle)
 // 4. Issues/PRs incremental (only owned repos whose pushed_at changed)
 
+// Single-writer lock: prevents two serve processes from running concurrently.
+// ponytail: PID lockfile. Ceiling: flock or a proper DB advisory lock.
+const LOCK_FILE = resolve(import.meta.dir, "../..", ".data/serve.lock");
+
+function acquireLock(): void {
+  const dir = dirname(LOCK_FILE);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (existsSync(LOCK_FILE)) {
+    const pidStr = readFileSync(LOCK_FILE, "utf8").trim();
+    const pid = Number(pidStr);
+    if (pid && !Number.isNaN(pid)) {
+      try {
+        process.kill(pid, 0); // Check if process is alive
+        console.error(`Another serve process is running (PID ${pid}). Only one serve instance allowed.`);
+        console.error(`Remove ${LOCK_FILE} if stale, or stop the other process first.`);
+        process.exit(1);
+      } catch {
+        // Process is dead — stale lock, reclaim it
+      }
+    }
+  }
+  writeFileSync(LOCK_FILE, String(process.pid));
+}
+
+function releaseLock(): void {
+  try {
+    unlinkSync(LOCK_FILE);
+  } catch {}
+}
+
 export async function serveCommand(): Promise<void> {
+  acquireLock();
   const cfg = loadConfig();
   const intervalMs = cfg.RECONCILE_INTERVAL_SECONDS * 1000;
 
   console.log(`Reconcile loop started (interval: ${cfg.RECONCILE_INTERVAL_SECONDS}s)`);
   console.log("Press Ctrl+C to stop.\n");
 
+  let timer: ReturnType<typeof setInterval>;
+  const stop = () => {
+    releaseLock();
+    clearInterval(timer);
+    console.log("\nReconcile loop stopped.");
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  process.on("exit", () => releaseLock());
+
   await reconcileOnce();
-  const timer = setInterval(() => {
+  timer = setInterval(() => {
     reconcileOnce().catch((err) => {
       logger.error({ err: (err as Error).message }, "reconcile cycle failed");
     });
   }, intervalMs);
-
-  process.on("SIGINT", () => {
-    clearInterval(timer);
-    console.log("\nReconcile loop stopped.");
-    process.exit(0);
-  });
 }
 
 async function reconcileOnce(): Promise<void> {

@@ -89,3 +89,31 @@ When Phase 2 begins:
 8. Add webhook fixture tests under `tests/fixtures/webhooks/`.
 
 The SQLite schema (`sync_jobs`, `webhook_deliveries`) is already in `001_init.sql` from Phase 1, so Phase 2 doesn't need a migration.
+
+## Hardening (star code sync era)
+
+### Single-writer rule
+
+Only one `mirror serve` process should run at a time. A PID lockfile at `.data/serve.lock` enforces this — a second serve will exit immediately with the PID of the running instance. The lockfile is auto-reclaimed if the process is dead.
+
+Bulk `mirror code sync --stars` can run alongside serve (different code path, no lock conflict), but avoid running two bulk code syncs simultaneously.
+
+### Star code sync progress
+
+Bulk star code sync persists progress to SQLite meta:
+- `stars_code_total` — total repos to sync
+- `stars_code_done` — repos completed
+- `stars_code_current` — repo currently syncing
+- `stars_code_last_error` — last error if any
+
+View via `mirror status`, `mirror code status`, or `mirror dashboard`.
+
+Starred repos are sorted by file count ascending (smaller repos first) so one huge star doesn't block hundreds.
+
+### File-cap honesty
+
+Repos hitting `CODE_MAX_FILES_PER_REPO` (default 5000) or with truncated Git trees are marked `partial` with `last_error: "file cap reached"`, not `ready`. This distinguishes "fully synced" from "synced up to the cap."
+
+### Source property backfill
+
+`mirror repair repo-sources` reads `repo_source` from SQLite and writes the `Source` property to Notion repo pages. Run once after upgrading to the version that added the Source property.
