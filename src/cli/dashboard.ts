@@ -188,7 +188,7 @@ function renderDashboard(filter: { starsOnly: boolean; ownedOnly: boolean; all: 
   if (rows.length > maxRows) {
     const from = effectiveScroll + 1;
     const to = Math.min(effectiveScroll + maxRows, rows.length);
-    lines.push(`  ${dim(`Showing ${from}-${to} of ${rows.length}  ↑↓/jk scroll  PgUp/PgDn  g/G top/bottom  q quit`)}`);
+    lines.push(`  ${dim(`Showing ${from}-${to} of ${rows.length}`)}`);
   }
 
   // Errors section
