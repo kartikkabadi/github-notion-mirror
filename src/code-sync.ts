@@ -21,6 +21,31 @@ import {
 } from "./state/sqlite.ts";
 import { sha256, nowIso, truncate } from "./util.ts";
 
+// --- Code rollup: update Notion repo page with code sync state ---
+
+async function updateRepoCodeRollup(
+  repoNotionPageId: string,
+  state: { headSha: string | null; fileCount: number | null; syncStatus: string; lastSynced: string },
+): Promise<void> {
+  const notion = getNotion();
+  try {
+    await notionCall(() =>
+      notion.pages.update({
+        page_id: repoNotionPageId,
+        properties: {
+          "Code Sync Enabled": { checkbox: true },
+          "Code HEAD SHA": { rich_text: [{ text: { content: state.headSha?.slice(0, 12) ?? "" } }] },
+          "Code File Count": { number: state.fileCount ?? 0 },
+          "Code Last Synced": { date: { start: state.lastSynced } },
+          "Code Sync Status": { select: { name: state.syncStatus } },
+        } as never,
+      }),
+    );
+  } catch (err) {
+    logger.debug({ page_id: repoNotionPageId, err: (err as Error).message }, "repo rollup update failed");
+  }
+}
+
 // Code sync: fetch repo tree, filter, fetch blobs, project to Notion Code Files DB.
 // SHA-based incremental — only re-syncs files whose blob_sha changed.
 
@@ -95,7 +120,7 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
       // Ceiling: use file magic bytes for precise detection.
       if (content.includes("\0")) {
         logger.debug({ repo: repo.full_name, path: entry.path }, "skipping binary file");
-        skipped.push({ path: entry.path, sha: entry.sha, reason: "binary" });
+        skipped.push({ entry, reason: "binary" });
         continue;
       }
 
@@ -106,6 +131,7 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
       // Build Notion properties
       const props: Record<string, unknown> = {
         Path: { title: [{ text: { content: entry.path } }] },
+        "Full Path Key": { rich_text: [{ text: { content: fullPathKey.slice(0, 2000) } }] },
         "Blob SHA": { rich_text: [{ text: { content: entry.sha.slice(0, 12) } }] },
         Ref: { rich_text: [{ text: { content: "HEAD" } }] },
         Language: { select: { name: language } },
@@ -144,7 +170,7 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
         pageId = existing.notion_page_id;
       } else {
         // Check if page exists in Notion by blob SHA (recovery path)
-        const found = await findPageByBlobSha(codeDsId, entry.sha, entry.path);
+        const found = await findPageByBlobSha(codeDsId, entry.sha, entry.path, fullPathKey);
         if (found) {
           await notionCall(() => getNotion().pages.update({ page_id: found, properties: props as never }));
           await notionCall(() =>
@@ -224,6 +250,16 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
     last_error: errors > 0 ? `${errors} files failed` : null,
   });
 
+  // Update Notion repo page with code rollup fields
+  if (repo.notion_page_id) {
+    await updateRepoCodeRollup(repo.notion_page_id, {
+      headSha: tree.treeSha,
+      fileCount: included.length,
+      syncStatus: errors > 0 ? "partial" : "ready",
+      lastSynced: nowIso(),
+    });
+  }
+
   logger.info({ repo: repo.full_name, synced, skipped: skipped.length, errors }, "code sync done");
   return { synced, skipped: skipped.length, errors };
 }
@@ -299,10 +335,24 @@ function sanitizeCodeContent(content: string): string {
   return s;
 }
 
-async function findPageByBlobSha(dataSourceId: string, blobSha: string, path: string): Promise<string | null> {
-  // ponytail: search by path title instead of blob SHA (title is unique per file).
-  // Ceiling: add a "Full Path Key" property for exact lookup.
+async function findPageByBlobSha(dataSourceId: string, blobSha: string, path: string, fullPathKey?: string): Promise<string | null> {
+  // Look up by Full Path Key (exact, unique per repo+ref+path).
+  // Fallback: Path title (recovery for pages created before Full Path Key existed).
   const notion = getNotion();
+  if (fullPathKey) {
+    try {
+      const res = await notionCall(() =>
+        notion.dataSources.query({
+          data_source_id: dataSourceId,
+          filter: { property: "Full Path Key", rich_text: { equals: fullPathKey } },
+          page_size: 1,
+        }),
+      );
+      if (res.results.length > 0) return res.results[0]!.id;
+    } catch {
+      // Full Path Key property may not exist yet on older data sources — fall through to Path lookup.
+    }
+  }
   const res = await notionCall(() =>
     notion.dataSources.query({
       data_source_id: dataSourceId,

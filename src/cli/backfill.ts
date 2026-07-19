@@ -1,6 +1,7 @@
 import { loadConfig } from "../config.ts";
 import {
   listInstallationRepos,
+  listStarredRepos,
   loadRepo,
   loadIssue,
   loadIssueComments,
@@ -14,7 +15,7 @@ import {
 } from "../github/loaders.ts";
 import { projectRepo, projectIssue, projectPull } from "../projection.ts";
 import { upsertRepo, upsertWorkItem, markObjectError } from "../notion/upsert.ts";
-import { getObject } from "../state/sqlite.ts";
+import { getObject, setMeta } from "../state/sqlite.ts";
 import { logger } from "../logging.ts";
 
 function parseRepoArg(arg: string | undefined): { owner: string; repo: string } | null {
@@ -30,9 +31,15 @@ function parseRepoArg(arg: string | undefined): { owner: string; repo: string } 
 export async function backfillCommand(args: string[]): Promise<void> {
   const cfg = loadConfig();
   const includeClosed = cfg.BACKFILL_INCLUDE_CLOSED || args.includes("--include-closed");
+  const starsOnly = args.includes("--stars");
   const repoArg = args.find((a) => a.startsWith("--repo="))?.slice(7)
     ?? (args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined);
   const target = parseRepoArg(repoArg);
+
+  if (starsOnly) {
+    await backfillStars();
+    return;
+  }
 
   const repos: RepoData[] = target ? [await loadRepo(target.owner, target.repo)] : await listInstallationRepos();
 
@@ -40,16 +47,47 @@ export async function backfillCommand(args: string[]): Promise<void> {
 
   for (const repo of repos) {
     if (repo.archived && !cfg.BACKFILL_INCLUDE_CLOSED) {
-      // ponytail: archived repos skipped by default; flag toggles. Spec says include_archived=false default.
       console.log(`- skip ${repo.full_name} (archived)`);
       continue;
     }
-    await backfillRepo(repo, includeClosed);
+    await backfillRepo(repo, includeClosed, "owned");
   }
   console.log("\nBackfill complete.");
 }
 
-async function backfillRepo(repo: RepoData, includeClosed: boolean): Promise<void> {
+async function backfillStars(): Promise<void> {
+  console.log("Fetching starred repos...");
+  const stars = await listStarredRepos();
+  console.log(`Found ${stars.length} starred repo(s)\n`);
+
+  // Get owned repos to detect overlap (owned wins)
+  const owned = await listInstallationRepos();
+  const ownedIds = new Set(owned.map((r) => r.node_id));
+
+  let upserted = 0;
+  let skipped = 0;
+  for (const repo of stars) {
+    if (ownedIds.has(repo.node_id)) {
+      // Already owned — skip, owned backfill handles it
+      skipped++;
+      continue;
+    }
+    try {
+      const repoProj = projectRepo(repo, undefined, "starred");
+      await upsertRepo(repoProj);
+      upserted++;
+      if (upserted % 10 === 0) console.log(`  ... ${upserted} starred repos upserted`);
+    } catch (err) {
+      console.error(`- star ${repo.full_name} failed: ${(err as Error).message}`);
+      markObjectError(repo.node_id, err);
+    }
+  }
+
+  setMeta("last_star_refresh_at", new Date().toISOString());
+  console.log(`\nStar backfill complete: ${upserted} upserted, ${skipped} already owned.`);
+}
+
+async function backfillRepo(repo: RepoData, includeClosed: boolean, source: "owned" | "starred"): Promise<void> {
   const cfg = loadConfig();
   const [owner, name] = repo.full_name.split("/");
   if (!owner || !name) {
@@ -62,11 +100,17 @@ async function backfillRepo(repo: RepoData, includeClosed: boolean): Promise<voi
   // 1. Upsert repo row first so work items can relate to it.
   let repoPageId: string;
   try {
-    const repoProj = projectRepo(repo);
+    const repoProj = projectRepo(repo, undefined, source);
     repoPageId = await upsertRepo(repoProj);
   } catch (err) {
     console.error(`- repo upsert failed: ${(err as Error).message}`);
     markObjectError(repo.node_id, err);
+    return;
+  }
+
+  // Starred repos: code only, no issues/PRs
+  if (source === "starred") {
+    console.log("- starred repo (code only, skipping issues/PRs)");
     return;
   }
 

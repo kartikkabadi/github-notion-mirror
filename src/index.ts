@@ -6,20 +6,29 @@ import { doctorCommand } from "./cli/doctor.ts";
 import { codeCommand } from "./cli/code.ts";
 import { pollReadyIssues } from "./publish.ts";
 import { serveCommand } from "./cli/serve.ts";
+import { installDaemonCommand, uninstallDaemonCommand, daemonStatusCommand } from "./cli/daemon.ts";
+import { repairCommand } from "./cli/repair.ts";
 
 const USAGE = `GitHub Notion Mirror
 
 Usage:
   mirror init                              Validate env + create/ensure Notion DBs
   mirror backfill [--repo owner/name]      Backfill repos, issues, PRs
+                                           [--include-closed] [--stars]
   mirror sync issue owner/name#n           Sync a single issue
   mirror sync pull owner/name#n            Sync a single PR
-  mirror code sync [--all | --repo o/r]    Sync repo code files to Notion
+  mirror code sync [--all|--owned|--stars] Sync repo code files to Notion
+                       [--repo o/r]
   mirror code status                       Show code sync state per repo
   mirror status                            Show queue/state summary
   mirror doctor                            Run health checks
   mirror publish                           Create GitHub issues from Notion (Publish State=ready)
   mirror serve                             Start auto-sync reconcile loop (5s interval)
+  mirror install-daemon                    Install launchd KeepAlive daemon
+  mirror uninstall-daemon                  Remove launchd daemon
+  mirror daemon-status                     Check daemon status
+  mirror repair repo-rollups               Fix Notion repo code rollup fields
+  mirror repair work-item-origins          Fix missing Origin/Publish State on work items
 `;
 
 async function main(): Promise<void> {
@@ -63,6 +72,18 @@ async function main(): Promise<void> {
       }
       case "serve":
         await serveCommand();
+        break;
+      case "install-daemon":
+        await installDaemonCommand();
+        break;
+      case "uninstall-daemon":
+        await uninstallDaemonCommand();
+        break;
+      case "daemon-status":
+        await daemonStatusCommand();
+        break;
+      case "repair":
+        await repairCommand(rest);
         break;
       case "reconcile":
         console.error(`"reconcile" is not implemented yet. Use "mirror serve" for the auto-sync loop.`);

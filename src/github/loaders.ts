@@ -133,6 +133,14 @@ export async function listInstallationRepos(): Promise<RepoData[]> {
   return repos as unknown as RepoData[];
 }
 
+export async function listStarredRepos(): Promise<RepoData[]> {
+  const ok = getOctokit();
+  const repos = await paginate((page) =>
+    ok.rest.activity.listReposStarredByAuthenticatedUser({ per_page: 100, page }),
+  );
+  return repos as unknown as RepoData[];
+}
+
 export async function loadIssue(owner: string, repo: string, number: number): Promise<IssueData> {
   const ok = getOctokit();
   const { data } = await ok.rest.issues.get({ owner, repo, issue_number: number });

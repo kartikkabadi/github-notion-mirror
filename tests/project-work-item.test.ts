@@ -99,6 +99,25 @@ describe("projectRepo", () => {
     const a = projectRepo(repoFixture);
     expect(a.selectOptionsToEnsure.find((o) => o.prop === "Visibility" && o.value === "public")).toBeTruthy();
   });
+
+  it("defaults Source to owned", () => {
+    const a = projectRepo(repoFixture);
+    const sourceProp = a.notionProperties["Source"] as { select: { name: string } };
+    expect(sourceProp.select.name).toBe("owned");
+    expect(a.source).toBe("owned");
+  });
+
+  it("sets Source to starred when passed", () => {
+    const a = projectRepo(repoFixture, undefined, "starred");
+    const sourceProp = a.notionProperties["Source"] as { select: { name: string } };
+    expect(sourceProp.select.name).toBe("starred");
+    expect(a.source).toBe("starred");
+  });
+
+  it("includes Source in selectOptionsToEnsure", () => {
+    const a = projectRepo(repoFixture);
+    expect(a.selectOptionsToEnsure.find((o) => o.prop === "Source" && o.value === "owned")).toBeTruthy();
+  });
 });
 
 describe("projectIssue state mapping", () => {
@@ -132,6 +151,20 @@ describe("projectIssue state mapping", () => {
       comments: [{ id: 1, user: { login: "x" }, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", body: "hi" }],
     });
     expect(a.sourceHash).not.toBe(b.sourceHash);
+  });
+
+  it("sets Origin=github and Publish State=created", () => {
+    const proj = projectIssue(issueFixture, repoFixture, "repo-page-id", { comments: [] });
+    const originProp = proj.notionProperties["Origin"] as { select: { name: string } };
+    const pubProp = proj.notionProperties["Publish State"] as { select: { name: string } };
+    expect(originProp.select.name).toBe("github");
+    expect(pubProp.select.name).toBe("created");
+  });
+
+  it("includes Origin and Publish State in selectOptionsToEnsure", () => {
+    const proj = projectIssue(issueFixture, repoFixture, "repo-page-id", { comments: [] });
+    expect(proj.selectOptionsToEnsure.find((o) => o.prop === "Origin" && o.value === "github")).toBeTruthy();
+    expect(proj.selectOptionsToEnsure.find((o) => o.prop === "Publish State" && o.value === "created")).toBeTruthy();
   });
 });
 
@@ -207,5 +240,18 @@ describe("projectPull merged vs closed", () => {
       files: [],
     });
     expect(a.sourceHash).toBe(b.sourceHash);
+  });
+
+  it("sets Origin=github and Publish State=created on PRs", () => {
+    const proj = projectPull(pullOpenFixture, repoFixture, "repo-page-id", {
+      issueComments: [],
+      reviews: [],
+      reviewComments: [],
+      files: [],
+    });
+    const originProp = proj.notionProperties["Origin"] as { select: { name: string } };
+    const pubProp = proj.notionProperties["Publish State"] as { select: { name: string } };
+    expect(originProp.select.name).toBe("github");
+    expect(pubProp.select.name).toBe("created");
   });
 });

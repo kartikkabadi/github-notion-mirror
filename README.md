@@ -16,8 +16,10 @@ Ask 5 models the same question about a PR, cross-reference their answers, find b
 
 - Mirrors repos, issues, and PRs (metadata + bodies + comments + reviews + diffs) into Notion databases
 - Syncs code files from each repo's default branch into a Code Files database (full file content, language-detected, SHA-based incremental)
+- Mirrors starred repos (code only, no issues/PRs) with `Source=starred` distinction
 - Creates GitHub issues from Notion (set Publish State = ready, run `mirror publish`)
 - Auto-sync daemon (`mirror serve`) runs every 5 seconds — only syncs repos that actually changed
+- launchd daemon installer (`mirror install-daemon`) for KeepAlive auto-start on macOS
 - Idempotent: re-running sync never duplicates pages; edits converge to latest GitHub state
 - SQLite-backed control plane (object map, checkpoints, code file state)
 - Rate-limited Notion writes (~2 rps, handles 429/529 + Retry-After)
@@ -100,15 +102,20 @@ Ask 5 models the same question about a PR, cross-reference their answers, find b
 | Command | What it does |
 | --- | --- |
 | `mirror init` | Validate env; create/ensure Notion DBs; persist IDs |
-| `mirror backfill [--repo o/r] [--include-closed]` | Full or single-repo backfill of repos, issues, PRs |
+| `mirror backfill [--repo o/r] [--include-closed] [--stars]` | Full or single-repo backfill of repos, issues, PRs. `--stars` syncs starred repos only (code, no issues/PRs) |
 | `mirror sync issue owner/repo#n` | Manual single-issue sync |
 | `mirror sync pull owner/repo#n` | Manual single-PR sync (includes full diffs) |
-| `mirror code sync [--all \| --repo o/r]` | Sync code files from default branch |
+| `mirror code sync [--all \| --owned \| --stars \| --repo o/r]` | Sync code files from default branch |
 | `mirror code status` | Show code sync state per repo |
 | `mirror publish` | Create GitHub issues from Notion (Publish State = ready) |
-| `mirror serve` | Start auto-sync reconcile loop (5s interval) |
+| `mirror serve` | Start auto-sync reconcile loop (5s interval, includes star refresh) |
+| `mirror install-daemon` | Install launchd KeepAlive daemon (macOS, auto-start on login) |
+| `mirror uninstall-daemon` | Remove launchd daemon |
+| `mirror daemon-status` | Check if daemon is installed and running |
+| `mirror repair repo-rollups` | Fix Notion repo code rollup fields (Code HEAD, File Count, etc.) |
+| `mirror repair work-item-origins` | Backfill Origin=github and Publish State=created on existing work items |
 | `mirror status` | Repo count, data source IDs, recent errors |
-| `mirror doctor` | Health checks: config, Notion token, root page, data sources, GitHub API, SQLite |
+| `mirror doctor` | Health checks: config, Notion token, root page, data sources, GitHub API, SQLite, daemon |
 
 ## Notion → GitHub issue creation
 
@@ -129,6 +136,29 @@ Publish State transitions: `draft` → `ready` → `creating` → `created` (or 
 - Capped at 200KB per file, 5000 files per repo
 - SHA-based incremental — only re-syncs files whose blob SHA changed
 - Content sanitization: strips control chars, zero-width Unicode, HTML comments, replaces triple backticks
+- Repo page gets code rollup fields: Code HEAD SHA, File Count, Code Sync Status, Code Last Synced
+
+## Starred repos
+
+- `mirror backfill --stars` fetches your starred repos and upserts them with `Source=starred`
+- Starred repos get code sync only (no issues/PRs — they're not yours)
+- The serve loop refreshes stars every `STAR_REFRESH_HOURS` (default 12h)
+- `mirror code sync --stars` syncs code for starred repos
+- Owned repos that are also starred show as `Source=owned` (owned wins)
+
+## launchd daemon (macOS)
+
+- `mirror install-daemon` creates a LaunchAgent that runs `mirror serve` with KeepAlive
+- Starts automatically on login, restarts on crash
+- Logs to `~/Library/Logs/github-notion-mirror/daemon.log` and `daemon.err`
+- `mirror uninstall-daemon` stops and removes the agent
+- `mirror daemon-status` checks if the daemon is loaded and running
+- `mirror doctor` includes daemon health checks
+
+## Repair commands
+
+- `mirror repair repo-rollups` — writes code sync state (HEAD SHA, file count, status) to Notion repo pages. Run after upgrading if code sync ran before rollup fields existed.
+- `mirror repair work-item-origins` — backfills `Origin=github` and `Publish State=created` on work items synced before those properties existed.
 
 ## Security notes
 
@@ -154,6 +184,6 @@ Publish State transitions: `draft` → `ready` → `creating` → `created` (or 
 - **GitHub:** Octokit REST API
 - **Notion:** @notionhq/client (databases, pages, async markdown)
 - **Config:** Zod schema validation
-- **Tests:** Vitest (37 tests)
+- **Tests:** Vitest (44 tests)
 
 See `docs/AGENT_NOTES.md` for the file-by-file build state and ponytail shortcuts marked.

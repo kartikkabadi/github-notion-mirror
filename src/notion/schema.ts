@@ -50,6 +50,7 @@ const REPO_PROPERTIES = {
   "Last Synced": { date: {} },
   "Sync Status": { status: { options: [{ name: "synced" }, { name: "error" }, { name: "missing" }] } },
   "Source Hash": { rich_text: {} },
+  Source: { select: { options: [{ name: "owned" }, { name: "starred" }] } },
   "Code Sync Enabled": { checkbox: {} },
   "Code HEAD SHA": { rich_text: {} },
   "Code File Count": { number: {} },
@@ -97,6 +98,7 @@ const WORK_ITEM_PROPERTIES = (repoDataSourceId: string) => ({
 
 const CODE_FILE_PROPERTIES = (repoDataSourceId: string) => ({
   Path: { title: {} },
+  "Full Path Key": { rich_text: {} },
   Repository: { relation: { data_source_id: repoDataSourceId, type: "single_property", single_property: {} } },
   "Blob SHA": { rich_text: {} },
   Ref: { rich_text: {} },

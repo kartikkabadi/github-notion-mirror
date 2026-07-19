@@ -73,9 +73,10 @@ export type RepoProjection = {
   bodyHash: string;
   // Labels/languages/visibility that need option-ensure before page update.
   selectOptionsToEnsure: { prop: string; value: string; kind: "select" }[];
+  source: "owned" | "starred";
 };
 
-export function projectRepo(repo: RepoData, notionPageId?: string): RepoProjection {
+export function projectRepo(repo: RepoData, notionPageId?: string, source?: "owned" | "starred"): RepoProjection {
   const cfg = loadConfig();
   const visibility = (repo.visibility ?? "public") as "public" | "private" | "internal";
   const properties: Record<string, PropVal> = {
@@ -95,6 +96,7 @@ export function projectRepo(repo: RepoData, notionPageId?: string): RepoProjecti
     "Last Synced": dateVal(nowIso()),
     "Sync Status": statusVal("synced"),
     "Source Hash": richText(""), // filled after hash computed
+    Source: selectVal(source ?? "owned"),
   };
 
   // Hash input: stable subset of props (exclude Last Synced, Source Hash, Sync Status — volatile).
@@ -145,6 +147,7 @@ export function projectRepo(repo: RepoData, notionPageId?: string): RepoProjecti
   const selectOptionsToEnsure: { prop: string; value: string; kind: "select" }[] = [];
   if (visibility) selectOptionsToEnsure.push({ prop: "Visibility", value: visibility, kind: "select" });
   if (repo.language) selectOptionsToEnsure.push({ prop: "Primary Language", value: repo.language, kind: "select" });
+  selectOptionsToEnsure.push({ prop: "Source", value: source ?? "owned", kind: "select" });
 
   return {
     githubNodeId: repo.node_id,
@@ -155,6 +158,7 @@ export function projectRepo(repo: RepoData, notionPageId?: string): RepoProjecti
     sourceHash,
     bodyHash: sha256(markdown),
     selectOptionsToEnsure,
+    source: source ?? "owned",
   };
 }
 
@@ -248,12 +252,16 @@ export function projectIssue(
     "Last Synced": dateVal(nowIso()),
     "Sync Status": statusVal("synced"),
     "Comment Count": numberVal(issue.comments),
+    Origin: selectVal("github"),
+    "Publish State": selectVal("created"),
   };
 
   const selectOptionsToEnsure: { prop: string; value: string; kind: "select" | "multi_select" }[] = [
     { prop: "Type", value: "Issue", kind: "select" },
     { prop: "State", value: state, kind: "select" },
     { prop: "Review State", value: "none", kind: "select" },
+    { prop: "Origin", value: "github", kind: "select" },
+    { prop: "Publish State", value: "created", kind: "select" },
   ];
   const multiSelectValues: { prop: string; values: string[]; kind: "multi_select" }[] = [
     { prop: "Assignees", values: assignees, kind: "multi_select" },
@@ -366,12 +374,16 @@ export function projectPull(
     "Last Synced": dateVal(nowIso()),
     "Sync Status": statusVal("synced"),
     "Comment Count": numberVal(pull.comments + pull.review_comments),
+    Origin: selectVal("github"),
+    "Publish State": selectVal("created"),
   };
 
   const selectOptionsToEnsure: { prop: string; value: string; kind: "select" | "multi_select" }[] = [
     { prop: "Type", value: "Pull Request", kind: "select" },
     { prop: "State", value: state, kind: "select" },
     { prop: "Review State", value: reviewState, kind: "select" },
+    { prop: "Origin", value: "github", kind: "select" },
+    { prop: "Publish State", value: "created", kind: "select" },
   ];
   const multiSelectValues: { prop: string; values: string[]; kind: "multi_select" }[] = [
     { prop: "Assignees", values: assignees, kind: "multi_select" },

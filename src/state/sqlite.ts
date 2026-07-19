@@ -21,7 +21,7 @@ export function getDb(): Database {
 
 function runMigrations(database: Database): void {
   // ponytail: sequential migration runner. Ceiling: tracked schema_migrations table if count grows.
-  const files = ["001_init.sql", "002_code_sync.sql"];
+  const files = ["001_init.sql", "002_code_sync.sql", "003_repo_source.sql"];
   for (const f of files) {
     const sql = readFileSync(join(MIGRATIONS_DIR, f), "utf8");
     database.exec(sql);
@@ -43,15 +43,16 @@ export type GithubObjectRow = {
   last_checked_at: string | null;
   sync_status: "synced" | "error" | "missing" | "pending";
   last_error: string | null;
+  repo_source?: "owned" | "starred" | null;
 };
 
 const upsertObjectStmt = (db: Database) => db.prepare(`
   INSERT INTO github_objects
     (github_node_id, object_type, repo_node_id, repo_full_name, number,
      github_updated_at, source_hash, body_hash, mapper_version,
-     notion_page_id, last_synced_at, last_checked_at, sync_status, last_error)
+     notion_page_id, last_synced_at, last_checked_at, sync_status, last_error, repo_source)
   VALUES
-    (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+    (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
   ON CONFLICT(github_node_id) DO UPDATE SET
     object_type=excluded.object_type,
     repo_node_id=excluded.repo_node_id,
@@ -65,7 +66,8 @@ const upsertObjectStmt = (db: Database) => db.prepare(`
     last_synced_at=excluded.last_synced_at,
     last_checked_at=excluded.last_checked_at,
     sync_status=excluded.sync_status,
-    last_error=excluded.last_error
+    last_error=excluded.last_error,
+    repo_source=COALESCE(excluded.repo_source, github_objects.repo_source)
 `);
 
 export function upsertObject(row: GithubObjectRow): void {
@@ -85,6 +87,7 @@ export function upsertObject(row: GithubObjectRow): void {
     row.last_checked_at,
     row.sync_status,
     row.last_error,
+    row.repo_source ?? null,
   );
 }
 

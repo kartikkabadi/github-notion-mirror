@@ -187,6 +187,7 @@ export async function upsertRepo(proj: RepoProjection): Promise<string> {
     last_checked_at: nowIso(),
     sync_status: "synced",
     last_error: null,
+    repo_source: proj.source,
   };
   upsertObject(row);
   logger.info({ node_id: proj.githubNodeId, page_id: pageId }, "repo upserted");
@@ -210,8 +211,13 @@ export async function upsertWorkItem(proj: WorkItemProjection): Promise<string> 
 
   let pageId: string;
   if (prev?.notion_page_id) {
+    // On update: don't clobber Origin or Publish State — user may have set Origin=notion
+    // or Publish State=ready/creating. Only set these on create.
+    const updateProps = { ...proj.notionProperties };
+    delete updateProps["Origin"];
+    delete updateProps["Publish State"];
     await notionCall(() =>
-      notion.pages.update({ page_id: prev.notion_page_id!, properties: proj.notionProperties as never }),
+      notion.pages.update({ page_id: prev.notion_page_id!, properties: updateProps as never }),
     );
     if (prev.body_hash !== proj.bodyHash) {
       await replaceMarkdown(prev.notion_page_id, proj.markdown);
@@ -220,7 +226,10 @@ export async function upsertWorkItem(proj: WorkItemProjection): Promise<string> 
   } else {
     const existing = await findPageByNodeId(dsId, proj.githubNodeId);
     if (existing) {
-      await notionCall(() => notion.pages.update({ page_id: existing, properties: proj.notionProperties as never }));
+      const updateProps = { ...proj.notionProperties };
+      delete updateProps["Origin"];
+      delete updateProps["Publish State"];
+      await notionCall(() => notion.pages.update({ page_id: existing, properties: updateProps as never }));
       await replaceMarkdown(existing, proj.markdown);
       pageId = existing;
     } else {

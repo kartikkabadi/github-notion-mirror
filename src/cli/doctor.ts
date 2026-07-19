@@ -3,6 +3,7 @@ import { hasGitHubAuth, getOctokit } from "../github/auth.ts";
 import { pingNotion, pingRootPage } from "../notion/client.ts";
 import { getDataSourceId } from "../notion/schema.ts";
 import { getDb } from "../state/sqlite.ts";
+import { daemonChecks } from "./daemon.ts";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -62,6 +63,9 @@ export async function doctorCommand(): Promise<void> {
   // 8. No secrets in git
   const envPath = resolve(process.cwd(), ".env");
   checks.push({ name: ".env exists", ok: existsSync(envPath), detail: existsSync(envPath) ? "present" : "copy .env.example to .env" });
+
+  // 9. Daemon (launchd)
+  checks.push(...daemonChecks());
 
   printChecks(checks);
 

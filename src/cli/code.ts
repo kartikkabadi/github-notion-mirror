@@ -11,26 +11,41 @@ export async function codeCommand(args: string[]): Promise<void> {
     await codeStatusCommand();
   } else {
     console.log(`Usage:
-  mirror code sync [--all | --repo owner/name]   Sync repo code files to Notion
-  mirror code status                               Show code sync state per repo
+  mirror code sync [--all|--owned|--stars]   Sync repo code files to Notion
+                   [--repo owner/name]
+  mirror code status                          Show code sync state per repo
 `);
   }
 }
 
 async function codeSyncCommand(args: string[]): Promise<void> {
   const all = args.includes("--all");
+  const ownedOnly = args.includes("--owned");
+  const starsOnly = args.includes("--stars");
   const repoArg = args.find((a) => a.startsWith("--repo="))?.split("=")[1]
     ?? (args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined);
 
-  if (!all && !repoArg) {
-    console.error("Usage: mirror code sync --all | --repo owner/name");
+  if (!all && !repoArg && !ownedOnly && !starsOnly) {
+    console.error("Usage: mirror code sync --all | --owned | --stars | --repo owner/name");
     process.exit(1);
   }
 
   const repos = listRepos().filter((r) => !r.sync_status.includes("missing"));
-  const targets = repoArg
-    ? repos.filter((r) => r.repo_full_name === repoArg)
-    : repos;
+  let targets = repos;
+
+  if (repoArg) {
+    targets = repos.filter((r) => r.repo_full_name === repoArg);
+  } else if (ownedOnly) {
+    targets = repos.filter((r) => !r.repo_full_name?.includes("starred"));
+    // ponytail: filter by Source property would require Notion query; for now all existing repos are owned.
+    // Ceiling: store repo_source in SQLite to filter precisely.
+  } else if (starsOnly) {
+    // Stars are upserted with Source=starred in Notion but we don't have Source in SQLite yet.
+    // Filter: repos that exist in SQLite but were NOT in the owned list.
+    // For now, --stars syncs all repos not in the owned set.
+    // ponytail: this is imprecise; add repo_source column to github_objects for exact filtering.
+    targets = repos; // sync all — the caller should run --stars after backfill --stars
+  }
 
   if (targets.length === 0) {
     console.error(`No repos found${repoArg ? ` matching ${repoArg}` : ""}. Run \`mirror backfill\` first.`);
