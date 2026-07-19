@@ -13,8 +13,9 @@ import type { RepoProjection, WorkItemProjection } from "../projection.ts";
 // Ceiling: if Notion raises the sync timeout, lower the threshold or always use async.
 const ASYNC_MARKDOWN_THRESHOLD = 50_000;
 // Hard cap on markdown body sent to Notion. Bodies above this get truncated.
-// ponytail: 500KB is well within Notion's async limit but prevents multi-MB bodies from 500ing.
-const HARD_MARKDOWN_CAP = 500_000;
+// Notion's async markdown path rejects content well below its 500KB HTTP limit
+// with "too large to process asynchronously" — 200KB is empirically safe.
+const HARD_MARKDOWN_CAP = 200_000;
 
 type AsyncTaskInitial = {
   object: "async_task";
