@@ -3,8 +3,11 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { logger } from "../logging.ts";
 
-const DB_PATH = resolve(process.cwd(), ".data/mirror.db");
-const MIGRATIONS_DIR = resolve(process.cwd(), "migrations");
+// Resolve paths relative to the project root (parent of src/), not CWD.
+// This allows `mirror` to work from any directory via bun link.
+const PROJECT_ROOT = resolve(import.meta.dir, "../..");
+const DB_PATH = resolve(PROJECT_ROOT, ".data/mirror.db");
+const MIGRATIONS_DIR = resolve(PROJECT_ROOT, "migrations");
 
 let db: Database | null = null;
 

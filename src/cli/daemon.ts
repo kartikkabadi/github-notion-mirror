@@ -12,10 +12,11 @@ const LABEL = "com.kartikkabadi.github-notion-mirror";
 const LAUNCH_AGENTS_DIR = resolve(process.env.HOME ?? "~", "Library/LaunchAgents");
 const LOG_DIR = resolve(process.env.HOME ?? "~", "Library/Logs/github-notion-mirror");
 const PLIST_PATH = join(LAUNCH_AGENTS_DIR, `${LABEL}.plist`);
-const START_SCRIPT = resolve(process.cwd(), "start-daemon.sh");
+const PROJECT_ROOT = resolve(import.meta.dir, "../..");
+const START_SCRIPT = resolve(PROJECT_ROOT, "start-daemon.sh");
 
 export async function installDaemonCommand(): Promise<void> {
-  const repoRoot = process.cwd();
+  const repoRoot = PROJECT_ROOT;
 
   // 1. Verify bun is available
   const bunPath = execSync("which bun", { encoding: "utf8" }).trim();

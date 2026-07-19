@@ -1,34 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { execSync } from "node:child_process";
 
 // Tests for the launchd daemon installer.
-// We test the plist/start-script generation by running install-daemon in a temp HOME
-// and verifying the files exist and contain expected content.
+// We run install-daemon from the real project root and verify the plist
+// and start script contain the correct paths. We use a temp HOME so the
+// plist doesn't clobber the real one.
 // We do NOT test launchctl bootstrap (that requires a real session).
 
-const TMP_DIR = resolve("/tmp/mirror-daemon-test-" + Date.now());
-const TMP_HOME = join(TMP_DIR, "home");
-const TMP_REPO = join(TMP_DIR, "repo");
+const PROJECT_ROOT = resolve(import.meta.dir, "..");
 
 describe("install-daemon", () => {
+  const TMP_HOME = resolve("/tmp/mirror-daemon-test-" + Date.now());
+
   beforeEach(() => {
-    mkdirSync(TMP_HOME, { recursive: true });
-    mkdirSync(TMP_REPO, { recursive: true });
-    mkdirSync(join(TMP_REPO, "src"), { recursive: true });
-    writeFileSync(join(TMP_REPO, ".env"), "NOTION_TOKEN=test\nNOTION_ROOT_PAGE_ID=test\n");
-    writeFileSync(join(TMP_REPO, "src/index.ts"), "console.log('test');\n");
+    mkdirSync(join(TMP_HOME, "Library/LaunchAgents"), { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    rmSync(TMP_HOME, { recursive: true, force: true });
   });
 
   it("generates plist and start script with correct paths", () => {
     const env = { ...process.env, HOME: TMP_HOME };
     try {
-      execSync(`cd ${TMP_REPO} && bun ${resolve(process.cwd(), "src/index.ts")} install-daemon`, {
+      execSync(`bun ${join(PROJECT_ROOT, "src/index.ts")} install-daemon`, {
         env,
         encoding: "utf8",
         stdio: "pipe",
@@ -42,7 +39,7 @@ describe("install-daemon", () => {
     }
 
     const plistPath = join(TMP_HOME, "Library/LaunchAgents/com.kartikkabadi.github-notion-mirror.plist");
-    const startPath = join(TMP_REPO, "start-daemon.sh");
+    const startPath = join(PROJECT_ROOT, "start-daemon.sh");
 
     expect(existsSync(plistPath)).toBe(true);
     expect(existsSync(startPath)).toBe(true);
@@ -51,11 +48,11 @@ describe("install-daemon", () => {
     expect(plist).toContain("com.kartikkabadi.github-notion-mirror");
     expect(plist).toContain("<key>KeepAlive</key>");
     expect(plist).toContain("<key>RunAtLoad</key>");
-    expect(plist).toContain(TMP_REPO);
+    expect(plist).toContain(PROJECT_ROOT);
 
     const start = readFileSync(startPath, "utf8");
     expect(start).toContain("cd");
-    expect(start).toContain(TMP_REPO);
+    expect(start).toContain(PROJECT_ROOT);
     expect(start).toContain("serve");
   });
 });

@@ -61,7 +61,7 @@ export async function doctorCommand(): Promise<void> {
   }
 
   // 8. No secrets in git
-  const envPath = resolve(process.cwd(), ".env");
+  const envPath = resolve(import.meta.dir, "../..", ".env");
   checks.push({ name: ".env exists", ok: existsSync(envPath), detail: existsSync(envPath) ? "present" : "copy .env.example to .env" });
 
   // 9. Daemon (launchd)

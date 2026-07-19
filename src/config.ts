@@ -56,7 +56,7 @@ export function loadConfig(): Config {
   if (cached) return cached;
 
   // Bun auto-loads .env; nothing to do here. TOML overlay is optional.
-  const tomlPath = resolve(process.cwd(), "config.toml");
+  const tomlPath = resolve(import.meta.dir, "..", "config.toml");
   let tomlOverrides: Record<string, string> = {};
   if (existsSync(tomlPath)) {
     tomlOverrides = parseSimpleToml(readFileSync(tomlPath, "utf8"));

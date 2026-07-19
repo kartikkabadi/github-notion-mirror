@@ -1,4 +1,15 @@
 #!/usr/bin/env bun
+// Load .env from project root so `mirror` works from any CWD (bun link).
+// Bun auto-loads .env from CWD only; we need it from the project dir.
+import { readFileSync } from "node:fs";
+try {
+  const envPath = new URL("../.env", import.meta.url).pathname;
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (m && m[1] && m[2] && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+} catch {}
+
 import { initCommand } from "./cli/init.ts";
 import { backfillCommand, syncSingle } from "./cli/backfill.ts";
 import { statusCommand } from "./cli/status.ts";
