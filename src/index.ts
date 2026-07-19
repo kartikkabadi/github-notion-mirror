@@ -8,6 +8,7 @@ import { pollReadyIssues } from "./publish.ts";
 import { serveCommand } from "./cli/serve.ts";
 import { installDaemonCommand, uninstallDaemonCommand, daemonStatusCommand } from "./cli/daemon.ts";
 import { repairCommand } from "./cli/repair.ts";
+import { dashboardCommand } from "./cli/dashboard.ts";
 
 const USAGE = `GitHub Notion Mirror
 
@@ -20,6 +21,8 @@ Usage:
   mirror code sync [--all|--owned|--stars] Sync repo code files to Notion
                        [--repo o/r]
   mirror code status                       Show code sync state per repo
+  mirror dashboard [--watch] [--stars|--owned|--all]  Live code sync dashboard
+                                           [--interval 2]
   mirror status                            Show queue/state summary
   mirror doctor                            Run health checks
   mirror publish                           Create GitHub issues from Notion (Publish State=ready)
@@ -58,6 +61,9 @@ async function main(): Promise<void> {
         break;
       case "status":
         statusCommand();
+        break;
+      case "dashboard":
+        await dashboardCommand(rest);
         break;
       case "doctor":
         await doctorCommand();

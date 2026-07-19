@@ -118,6 +118,7 @@ async function reconcileOnce(): Promise<void> {
   }
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  setMeta("last_reconcile_at", new Date().toISOString());
   logger.info({ elapsed_s: elapsed, changed: changedRepos.length }, "reconcile cycle done");
 }
 
