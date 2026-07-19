@@ -215,6 +215,9 @@ export async function ensureSchema(): Promise<EnsureResult> {
     }
   }
 
+  // Add new properties to existing code_files data source (idempotent migration).
+  await ensureNewProperties(codeDsId, CODE_FILE_PROPERTIES(reposDsId));
+
   return {
     repos: { database_id: reposDbId, data_source_id: reposDsId },
     work_items: { database_id: workDbId, data_source_id: workDsId },

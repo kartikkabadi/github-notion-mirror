@@ -1,4 +1,4 @@
-import { listRepos, getRepoCodeState } from "../state/sqlite.ts";
+import { listRepos, listReposBySource, getRepoCodeState } from "../state/sqlite.ts";
 import { syncRepoCode } from "../code-sync.ts";
 import { logger } from "../logging.ts";
 
@@ -30,21 +30,16 @@ async function codeSyncCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const repos = listRepos().filter((r) => !r.sync_status.includes("missing"));
-  let targets = repos;
-
+  let targets;
   if (repoArg) {
-    targets = repos.filter((r) => r.repo_full_name === repoArg);
+    targets = listRepos().filter((r) => r.repo_full_name === repoArg && !r.sync_status.includes("missing"));
   } else if (ownedOnly) {
-    targets = repos.filter((r) => !r.repo_full_name?.includes("starred"));
-    // ponytail: filter by Source property would require Notion query; for now all existing repos are owned.
-    // Ceiling: store repo_source in SQLite to filter precisely.
+    targets = listReposBySource("owned").filter((r) => !r.sync_status.includes("missing"));
   } else if (starsOnly) {
-    // Stars are upserted with Source=starred in Notion but we don't have Source in SQLite yet.
-    // Filter: repos that exist in SQLite but were NOT in the owned list.
-    // For now, --stars syncs all repos not in the owned set.
-    // ponytail: this is imprecise; add repo_source column to github_objects for exact filtering.
-    targets = repos; // sync all — the caller should run --stars after backfill --stars
+    targets = listReposBySource("starred").filter((r) => !r.sync_status.includes("missing"));
+  } else {
+    // --all: everything
+    targets = listRepos().filter((r) => !r.sync_status.includes("missing"));
   }
 
   if (targets.length === 0) {

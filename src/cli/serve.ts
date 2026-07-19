@@ -1,5 +1,5 @@
 import { loadConfig } from "../config.ts";
-import { listRepos, getRepoCheckpoint, setRepoCheckpoint, setMeta, getMeta } from "../state/sqlite.ts";
+import { listRepos, listReposBySource, getRepoCheckpoint, getRepoCodeState, setRepoCheckpoint, setMeta, getMeta, type GithubObjectRow } from "../state/sqlite.ts";
 import { syncRepoCode } from "../code-sync.ts";
 import { pollReadyIssues } from "../publish.ts";
 import {
@@ -122,6 +122,7 @@ async function reconcileOnce(): Promise<void> {
 }
 
 // Refresh stars every STAR_REFRESH_HOURS, not every cycle.
+// Also triggers code sync for starred repos whose pushed_at changed.
 async function maybeRefreshStars(): Promise<void> {
   const cfg = loadConfig();
   const last = getMeta("last_star_refresh_at");
@@ -135,18 +136,66 @@ async function maybeRefreshStars(): Promise<void> {
   const owned = await listInstallationRepos();
   const ownedIds = new Set(owned.map((r) => r.node_id));
 
+  // Build a map of existing starred repos from SQLite to compare pushed_at
+  const existingStars = new Map<string, GithubObjectRow>();
+  for (const row of listReposBySource("starred")) {
+    existingStars.set(row.github_node_id, row);
+  }
+
   let upserted = 0;
+  let codeSynced = 0;
+  const seenNodeIds = new Set<string>();
+
   for (const repo of stars) {
+    seenNodeIds.add(repo.node_id);
     if (ownedIds.has(repo.node_id)) continue;
+
+    const existing = existingStars.get(repo.node_id);
+    // Determine if code sync is needed: compare repo.pushed_at to last code scan time.
+    // New stars (no existing row) always need initial code sync.
+    // Existing stars need code sync only if pushed_at is newer than last_full_scan_at.
+    const codeState = existing ? getRepoCodeState(repo.node_id) : null;
+    const needsCodeSync = !codeState
+      || (repo.pushed_at && codeState.last_full_scan_at && repo.pushed_at > codeState.last_full_scan_at)
+      || (repo.pushed_at && !codeState.last_full_scan_at);
+
     try {
-      await upsertRepo(projectRepo(repo, undefined, "starred"));
+      const repoPageId = await upsertRepo(projectRepo(repo, undefined, "starred"));
       upserted++;
+
+      // If pushed_at changed (or new star), sync code for this starred repo
+      if (needsCodeSync) {
+        const [owner, name] = repo.full_name.split("/");
+        if (owner && name) {
+          try {
+            await syncRepoCode({
+              node_id: repo.node_id,
+              full_name: repo.full_name,
+              owner,
+              name,
+              notion_page_id: repoPageId,
+            });
+            codeSynced++;
+          } catch (err) {
+            logger.debug({ repo: repo.full_name, err: (err as Error).message }, "star code sync failed");
+          }
+        }
+      }
     } catch (err) {
       logger.debug({ repo: repo.full_name, err: (err as Error).message }, "star upsert failed");
     }
   }
+
+  // Mark starred repos that are no longer starred as missing
+  for (const [nodeId, row] of existingStars) {
+    if (!seenNodeIds.has(nodeId) && row.repo_full_name) {
+      logger.info({ repo: row.repo_full_name }, "star removed (no longer starred)");
+      // ponytail: just log, don't delete the Notion page. Ceiling: mark as unstarred or delete.
+    }
+  }
+
   setMeta("last_star_refresh_at", new Date().toISOString());
-  logger.info({ stars: stars.length, upserted }, "star refresh done");
+  logger.info({ stars: stars.length, upserted, codeSynced }, "star refresh done");
 }
 
 // Fetch all repos from GitHub (1 API call), compare pushed_at to last cycle.

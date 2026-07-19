@@ -20,11 +20,22 @@ export function getDb(): Database {
 }
 
 function runMigrations(database: Database): void {
-  // ponytail: sequential migration runner. Ceiling: tracked schema_migrations table if count grows.
+  // ponytail: sequential migration runner. ALTER TABLE ADD COLUMN is not idempotent
+  // in SQLite, so we catch "duplicate column name" errors on re-run.
+  // Ceiling: tracked schema_migrations table with version tracking if count grows.
   const files = ["001_init.sql", "002_code_sync.sql", "003_repo_source.sql"];
   for (const f of files) {
     const sql = readFileSync(join(MIGRATIONS_DIR, f), "utf8");
-    database.exec(sql);
+    try {
+      database.exec(sql);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes("duplicate column name")) {
+        // Column already exists from a previous run — safe to skip
+        continue;
+      }
+      throw err;
+    }
   }
 }
 
@@ -112,6 +123,10 @@ export function getMeta(key: string): string | null {
 
 export function listRepos(): GithubObjectRow[] {
   return getDb().prepare(`SELECT * FROM github_objects WHERE object_type = 'repository'`).all() as GithubObjectRow[];
+}
+
+export function listReposBySource(source: "owned" | "starred"): GithubObjectRow[] {
+  return getDb().prepare(`SELECT * FROM github_objects WHERE object_type = 'repository' AND repo_source = ?`).all(source) as GithubObjectRow[];
 }
 
 export function listErrors(limit = 20): GithubObjectRow[] {
