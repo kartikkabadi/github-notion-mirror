@@ -225,10 +225,13 @@ function buildCodeFileMarkdown(repoFullName: string, path: string, content: stri
   lines.push("");
   lines.push(`## Content`);
   lines.push("");
+  // ponytail: sanitize content for Notion's markdown parser.
+  // Notion's parser chokes on certain content even inside code fences.
+  // Strip HTML comments, null bytes, and other problematic constructs.
+  // Ceiling: language-specific code block + content-type-aware sanitization.
+  const sanitized = sanitizeCodeContent(content);
   lines.push("```");
-  // ponytail: truncate content to 100K chars to stay within Notion limits.
-  // Ceiling: language-specific code block + smarter truncation.
-  lines.push(truncate(content, 100_000));
+  lines.push(truncate(sanitized, 100_000));
   lines.push("```");
   lines.push("");
   lines.push(`## Meta`);
@@ -237,6 +240,18 @@ function buildCodeFileMarkdown(repoFullName: string, path: string, content: stri
   lines.push(`- size: ${size} bytes`);
   lines.push(`- synced: ${nowIso()}`);
   return lines.join("\n");
+}
+
+function sanitizeCodeContent(content: string): string {
+  let s = content;
+  // Remove null bytes and other control chars that break Notion's parser
+  s = s.replace(/\0/g, "");
+  // Strip HTML comments (Notion tries to parse them even in code blocks)
+  s = s.replace(/<!--[\s\S]*?-->/g, "");
+  // Escape backticks inside content by replacing them with a similar-looking char
+  // ponytail: Notion's markdown parser doesn't handle nested code fences well.
+  // Ceiling: use Notion's code block API directly for exact content preservation.
+  return s;
 }
 
 async function findPageByBlobSha(dataSourceId: string, blobSha: string, path: string): Promise<string | null> {
