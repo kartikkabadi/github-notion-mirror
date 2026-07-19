@@ -88,6 +88,17 @@ export async function syncRepoCode(repo: RepoRef): Promise<{ synced: number; ski
 
     try {
       const { content, size } = await fetchBlob(owner, name, entry.sha);
+
+      // Skip binary files — detect by checking for null bytes or high ratio
+      // of non-printable characters in the first 8KB.
+      // ponytail: simple null-byte check catches PNG, JPEG, PDF, etc.
+      // Ceiling: use file magic bytes for precise detection.
+      if (content.includes("\0")) {
+        logger.debug({ repo: repo.full_name, path: entry.path }, "skipping binary file");
+        skipped.push({ path: entry.path, sha: entry.sha, reason: "binary" });
+        continue;
+      }
+
       const contentHash = sha256(content);
       const language = languageFromPath(entry.path);
       const githubUrl = `https://github.com/${repo.full_name}/blob/HEAD/${entry.path}`;
@@ -244,13 +255,47 @@ function buildCodeFileMarkdown(repoFullName: string, path: string, content: stri
 
 function sanitizeCodeContent(content: string): string {
   let s = content;
-  // Remove null bytes and other control chars that break Notion's parser
+  // Remove null bytes
   s = s.replace(/\0/g, "");
+  // Remove carriage returns — Notion's markdown parser chokes on \r inside code blocks.
+  s = s.replace(/\r/g, "");
+  // Strip all ASCII control characters except newline (0x0A).
+  // Notion's parser fails on bell (0x07), backspace (0x08), vertical tab (0x0B),
+  // form feed (0x0C), shift in/out (0x0E/0x0F), escape (0x1B), etc.
+  s = s.replace(/[\x01-\x08\x0B-\x1F]/g, "");
+  // Strip zero-width and invisible Unicode characters that break Notion's parser:
+  // ZWJ U+200D, ZWNJ U+200C, ZWSP U+200B, BOM U+FEFF, line separator U+2028,
+  // paragraph separator U+2029, word joiner U+2060, soft hyphen U+00AD.
+  s = s.replace(/[\u200B\u200C\u200D\uFEFF\u2028\u2029\u2060\u00AD]/g, "");
+  // Replace tab characters with spaces — Notion's markdown parser interprets
+  // tabs as code block indentation and fails to create blocks.
+  s = s.replace(/\t/g, "  ");
   // Strip HTML comments (Notion tries to parse them even in code blocks)
   s = s.replace(/<!--[\s\S]*?-->/g, "");
-  // Escape backticks inside content by replacing them with a similar-looking char
-  // ponytail: Notion's markdown parser doesn't handle nested code fences well.
+  // Strip <details>, <summary>, and other HTML tags that confuse Notion's parser
+  s = s.replace(/<\/?(details|summary|script|style|iframe|object|embed)\b[^>]*>/gi, "");
+  // Replace triple backticks in content — they break the outer code fence.
+  // ponytail: use a visual equivalent that won't break the fence.
   // Ceiling: use Notion's code block API directly for exact content preservation.
+  s = s.replace(/```/g, "´´´");
+  // Break long lines — Notion's markdown parser fails on lines over ~2000 chars.
+  // ponytail: insert newlines at the nearest space/comma every 2000 chars.
+  // Ceiling: preserve original formatting via Notion's code block API.
+  s = s.split("\n").map(line => {
+    if (line.length <= 2000) return line;
+    const chunks: string[] = [];
+    let rest = line;
+    while (rest.length > 2000) {
+      // Try to break at a space or comma near the 2000 char mark
+      let breakAt = rest.lastIndexOf(" ", 2000);
+      if (breakAt < 1000) breakAt = rest.lastIndexOf(",", 2000);
+      if (breakAt < 1000) breakAt = 2000;
+      chunks.push(rest.slice(0, breakAt));
+      rest = rest.slice(breakAt);
+    }
+    chunks.push(rest);
+    return chunks.join("\n");
+  }).join("\n");
   return s;
 }
 

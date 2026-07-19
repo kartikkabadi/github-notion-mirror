@@ -30,7 +30,8 @@ function parseRepoArg(arg: string | undefined): { owner: string; repo: string } 
 export async function backfillCommand(args: string[]): Promise<void> {
   const cfg = loadConfig();
   const includeClosed = cfg.BACKFILL_INCLUDE_CLOSED || args.includes("--include-closed");
-  const repoArg = args.find((a) => a.startsWith("--repo="))?.slice(7) ?? args[args.indexOf("--repo") + 1];
+  const repoArg = args.find((a) => a.startsWith("--repo="))?.slice(7)
+    ?? (args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined);
   const target = parseRepoArg(repoArg);
 
   const repos: RepoData[] = target ? [await loadRepo(target.owner, target.repo)] : await listInstallationRepos();
