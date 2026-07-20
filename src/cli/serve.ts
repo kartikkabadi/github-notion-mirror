@@ -65,10 +65,12 @@ export async function serveCommand(): Promise<void> {
   console.log(`Reconcile loop started (interval: ${cfg.RECONCILE_INTERVAL_SECONDS}s)`);
   console.log("Press Ctrl+C to stop.\n");
 
-  let timer: ReturnType<typeof setInterval>;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout>;
   const stop = () => {
+    stopped = true;
+    clearTimeout(timer);
     releaseLock();
-    clearInterval(timer);
     console.log("\nReconcile loop stopped.");
     process.exit(0);
   };
@@ -76,12 +78,21 @@ export async function serveCommand(): Promise<void> {
   process.on("SIGTERM", stop);
   process.on("exit", () => releaseLock());
 
-  await reconcileOnce();
-  timer = setInterval(() => {
-    reconcileOnce().catch((err) => {
+  const scheduleNext = () => {
+    timer = setTimeout(runCycle, intervalMs);
+  };
+  const runCycle = async () => {
+    if (stopped) return;
+    try {
+      await reconcileOnce();
+    } catch (err) {
       logger.error({ err: (err as Error).message }, "reconcile cycle failed");
-    });
-  }, intervalMs);
+    }
+    if (!stopped) scheduleNext();
+  };
+
+  await reconcileOnce();
+  scheduleNext();
 }
 
 async function reconcileOnce(): Promise<void> {

@@ -11,6 +11,7 @@ export function getNotion(): Client {
   client = new Client({
     auth: cfg.NOTION_TOKEN,
     notionVersion: cfg.NOTION_VERSION,
+    retry: false,
   });
   return client;
 }
@@ -40,9 +41,10 @@ async function gate<T>(fn: () => Promise<T>): Promise<T> {
   const wait = minIntervalMs() - elapsed;
   if (wait > 0) await sleep(wait);
 
+  const maxAttempts = loadConfig().MAX_JOB_ATTEMPTS;
   const promise = (async () => {
     let attempt = 0;
-    while (true) {
+    while (attempt < maxAttempts) {
       try {
         state.lastRequestAt = Date.now();
         const result = await fn();
@@ -62,6 +64,7 @@ async function gate<T>(fn: () => Promise<T>): Promise<T> {
         throw err;
       }
     }
+    throw new Error(`notion call exhausted ${maxAttempts} attempts (rate limited)`);
   })();
   state.inflight = promise;
   try {
