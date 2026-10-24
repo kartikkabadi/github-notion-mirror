@@ -46,6 +46,10 @@ Usage:
 `;
 
 async function main(): Promise<void> {
+  if (!Bun.semver.satisfies(Bun.version, ">=1.4.4")) {
+    throw new Error(`Bun 1.4.4 or later is required; found ${Bun.version}.`);
+  }
+
   const [, , cmd, ...rest] = process.argv;
   if (!cmd) {
     console.log(USAGE);

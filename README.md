@@ -60,7 +60,7 @@ Ask 5 models the same question about a PR, cross-reference their answers, find b
 
 ## Prerequisites
 
-- Bun >= 1.3 (runtime + SQLite + test runner)
+- Bun >= 1.4.4 (runtime + SQLite + test runner)
 - A Notion account with permission to create an internal integration
 - A GitHub personal access token (fine-grained PAT with repo + issues read/write)
 
