@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 
 const ConfigSchema = z.object({
@@ -56,7 +56,7 @@ export function loadConfig(): Config {
   if (cached) return cached;
 
   // Bun auto-loads .env; nothing to do here. TOML overlay is optional.
-  const tomlPath = resolve(import.meta.dir, "..", "config.toml");
+  const tomlPath = fileURLToPath(new URL("../config.toml", import.meta.url));
   let tomlOverrides: Record<string, string> = {};
   if (existsSync(tomlPath)) {
     tomlOverrides = parseSimpleToml(readFileSync(tomlPath, "utf8"));

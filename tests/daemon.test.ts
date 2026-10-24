@@ -1,45 +1,57 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execSync } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { cpSync, existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 // Tests for the launchd daemon installer.
-// We run install-daemon from the real project root and verify the plist
-// and start script contain the correct paths. We use a temp HOME so the
-// plist doesn't clobber the real one.
-// We do NOT test launchctl bootstrap (that requires a real session).
+// Run the real CLI in a temporary project and HOME. Stub launchctl so the test
+// checks generated files without changing the user's launchd session.
 
-const PROJECT_ROOT = resolve(import.meta.dir, "..");
+const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 describe("install-daemon", () => {
-  const TMP_HOME = resolve("/tmp/mirror-daemon-test-" + Date.now());
+  let tempDir: string;
+  let fixtureRoot: string;
+  let fixtureHome: string;
+  let fixtureBin: string;
+  let launchctlLog: string;
 
   beforeEach(() => {
-    mkdirSync(join(TMP_HOME, "Library/LaunchAgents"), { recursive: true });
+    tempDir = mkdtempSync(join(tmpdir(), "mirror-daemon-test-"));
+    fixtureRoot = join(tempDir, "project");
+    fixtureHome = join(tempDir, "home");
+    fixtureBin = join(tempDir, "bin");
+    launchctlLog = join(tempDir, "launchctl.log");
+    mkdirSync(fixtureRoot);
+    mkdirSync(fixtureBin);
+    cpSync(join(PROJECT_ROOT, "src"), join(fixtureRoot, "src"), { recursive: true });
+    symlinkSync(join(PROJECT_ROOT, "node_modules"), join(fixtureRoot, "node_modules"), "dir");
+    writeFileSync(join(fixtureRoot, ".env"), "");
+    writeFileSync(join(fixtureBin, "launchctl"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LAUNCHCTL_TEST_LOG"\n', { mode: 0o755 });
   });
 
   afterEach(() => {
-    rmSync(TMP_HOME, { recursive: true, force: true });
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("generates plist and start script with correct paths", () => {
-    const env = { ...process.env, HOME: TMP_HOME };
-    try {
-      execSync(`bun ${join(PROJECT_ROOT, "src/index.ts")} install-daemon`, {
-        env,
-        encoding: "utf8",
-        stdio: "pipe",
-      });
-    } catch (err) {
-      // install-daemon may fail on launchctl bootstrap in test env, but files should exist
-      const stderr = (err as { stderr?: string }).stderr ?? "";
-      if (!stderr.includes("launchctl") && !stderr.includes("bootstrap") && !stderr.includes("bootout")) {
-        throw err;
-      }
-    }
+    const env = {
+      ...process.env,
+      HOME: fixtureHome,
+      PATH: `${fixtureBin}:${process.env.PATH}`,
+      LAUNCHCTL_TEST_LOG: launchctlLog,
+    };
+    execFileSync("bun", [join(fixtureRoot, "src/index.ts"), "install-daemon"], {
+      cwd: fixtureRoot,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+    });
 
-    const plistPath = join(TMP_HOME, "Library/LaunchAgents/com.kartikkabadi.github-notion-mirror.plist");
-    const startPath = join(PROJECT_ROOT, "start-daemon.sh");
+    const plistPath = join(fixtureHome, "Library/LaunchAgents/com.kartikkabadi.github-notion-mirror.plist");
+    const startPath = join(fixtureRoot, "start-daemon.sh");
 
     expect(existsSync(plistPath)).toBe(true);
     expect(existsSync(startPath)).toBe(true);
@@ -48,11 +60,17 @@ describe("install-daemon", () => {
     expect(plist).toContain("com.kartikkabadi.github-notion-mirror");
     expect(plist).toContain("<key>KeepAlive</key>");
     expect(plist).toContain("<key>RunAtLoad</key>");
-    expect(plist).toContain(PROJECT_ROOT);
+    expect(plist).toContain(fixtureRoot);
 
     const start = readFileSync(startPath, "utf8");
     expect(start).toContain("cd");
-    expect(start).toContain(PROJECT_ROOT);
+    expect(start).toContain(fixtureRoot);
     expect(start).toContain("serve");
+
+    const launchctlCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
+    expect(launchctlCalls).toHaveLength(2);
+    expect(launchctlCalls[0]).toMatch(/^bootout gui\/\d+ /);
+    expect(launchctlCalls[1]).toMatch(/^bootstrap gui\/\d+ /);
+    for (const call of launchctlCalls) expect(call).toContain(plistPath);
   });
 });
